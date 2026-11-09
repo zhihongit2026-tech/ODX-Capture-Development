@@ -384,6 +384,12 @@ public partial class MainWindow
             TaskRecordingHint.Text = "Sẵn sàng · chọn Task ID rồi bắt đầu ghi bằng nút hoặc F10.";
             return;
         }
+        if (_state == RunState.Starting || _runStarted == default)
+        {
+            TaskElapsedText.Text = "00:00:00";
+            TaskRecordingHint.Text = "Đang khởi tạo ghi hình · Task đã được giữ cố định cho phiên này.";
+            return;
+        }
         var elapsed = DateTime.Now - _runStarted;
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
         TaskElapsedText.Text = elapsed.ToString(@"hh\:mm\:ss");
