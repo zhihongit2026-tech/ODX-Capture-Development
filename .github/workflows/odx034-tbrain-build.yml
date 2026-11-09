@@ -6,6 +6,9 @@ on:
       - feature/odx-034-tbrain-workspace
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   windows-package:
     runs-on: windows-latest
@@ -15,6 +18,19 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Check .NET 10 and compile application before packaging
+        shell: pwsh
+        run: |
+          dotnet --info
+          dotnet build ./capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 -p:EnableWindowsTargeting=true -bl:odx034-build.binlog
+          if ($LASTEXITCODE -ne 0) { throw 'ODX 0.3.4 application compile failed; inspect build step' }
+      - name: Upload compilation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: odx034-build-diagnostics
+          path: odx034-build.binlog
+          if-no-files-found: ignore
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -30,6 +46,7 @@ jobs:
         run: |
           $env:MSYS2_ROOT = 'C:\msys64'
           ./capture/dotnet/publish.ps1 -Version 0.3.4
+          if ($LASTEXITCODE -ne 0) { throw 'ODX Windows package failed' }
       - name: Upload package
         if: success()
         uses: actions/upload-artifact@v4
