@@ -5,6 +5,193 @@
         Title="ODX Capture 0.3.4 | Tbrain Work" Icon="odx.ico" Width="1600" Height="900"
         MinWidth="1100" MinHeight="650" ResizeMode="CanResize" Background="#070D18"
         WindowStartupLocation="CenterScreen">
+  <Window.Resources>
+    <!-- Scoped design tokens for the three previously light Windows controls. -->
+    <Style x:Key="TbrainToolbarButtonStyle" TargetType="{x:Type Button}">
+      <Setter Property="Background" Value="#192D4B"/>
+      <Setter Property="Foreground" Value="#EAF2FF"/>
+      <Setter Property="BorderBrush" Value="#365680"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="MinHeight" Value="30"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type Button}">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="#244672"/>
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="#5B87CB"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="#18365E"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- The default Windows ComboBox draws a white selection area and popup. -->
+    <Style x:Key="TbrainTaskFilterOptionStyle" TargetType="{x:Type ComboBoxItem}">
+      <Setter Property="Foreground" Value="#EBF3FF"/>
+      <Setter Property="Background" Value="#10223D"/>
+      <Setter Property="Padding" Value="11,7"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+            <Border x:Name="ItemChrome" CornerRadius="4" Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}" Margin="2,1">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="ItemChrome" Property="Background" Value="#284D7E"/>
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="ItemChrome" Property="Background" Value="#1D416E"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.5"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="TbrainTaskFilterComboStyle" TargetType="{x:Type ComboBox}">
+      <Setter Property="Background" Value="#172A47"/>
+      <Setter Property="Foreground" Value="#ECF4FF"/>
+      <Setter Property="BorderBrush" Value="#40618E"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ComboBox}">
+            <Grid SnapsToDevicePixels="True">
+              <ToggleButton x:Name="DropDownToggle" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            Foreground="{TemplateBinding Foreground}" Focusable="False" ClickMode="Press"
+                            IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="DropChrome" CornerRadius="6" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                      <Grid>
+                        <TextBlock Text="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType={x:Type ComboBox}}}"
+                                   Foreground="#EEF5FF" Margin="10,0,26,0" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" FontSize="12"/>
+                        <Path Data="M 0 0 L 4 4 L 8 0" Stroke="#A9C5F0" StrokeThickness="1.8"
+                              StrokeLineJoin="Round" HorizontalAlignment="Right" VerticalAlignment="Center"
+                              Margin="0,0,10,0"/>
+                      </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="DropChrome" Property="Background" Value="#244672"/>
+                        <Setter TargetName="DropChrome" Property="BorderBrush" Value="#5B87CB"/>
+                      </Trigger>
+                      <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="DropChrome" Property="Background" Value="#1D416C"/>
+                        <Setter TargetName="DropChrome" Property="BorderBrush" Value="#6896D9"/>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
+                     IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Fade">
+                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                        MaxHeight="220" CornerRadius="6" BorderThickness="1" BorderBrush="#426893"
+                        Background="#10223D" Margin="0,3,0,0" Padding="3">
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                CanContentScroll="True">
+                    <ItemsPresenter/>
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Only applied to the task list, never to the recording/Room controls. -->
+    <Style x:Key="TbrainTaskScrollBarStyle" TargetType="{x:Type ScrollBar}">
+      <Setter Property="Width" Value="12"/>
+      <Setter Property="Background" Value="#0C1C32"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ScrollBar}">
+            <Grid Background="{TemplateBinding Background}" Width="12">
+              <Track x:Name="PART_Track" IsDirectionReversed="True"
+                     Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                     Value="{TemplateBinding Value}" ViewportSize="{TemplateBinding ViewportSize}">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="ScrollBar.PageUpCommand" Focusable="False" Opacity="0"/>
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb Margin="3,2,3,2">
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Border x:Name="Grabber" Background="#426895" CornerRadius="4"/>
+                        <ControlTemplate.Triggers>
+                          <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Grabber" Property="Background" Value="#6C9EE0"/>
+                          </Trigger>
+                          <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Grabber" Property="Background" Value="#8BB5F3"/>
+                          </Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="ScrollBar.PageDownCommand" Focusable="False" Opacity="0"/>
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="TbrainTaskRowStyle" TargetType="{x:Type ListBoxItem}">
+      <Setter Property="Foreground" Value="#EAF3FF"/>
+      <Setter Property="Padding" Value="3,1"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ListBoxItem}">
+            <Border x:Name="RowChrome" Background="Transparent" CornerRadius="5"
+                    Margin="2,1" Padding="{TemplateBinding Padding}">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="RowChrome" Property="Background" Value="#173052"/>
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="RowChrome" Property="Background" Value="#204576"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.5"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
   <Grid>
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="35*" MinWidth="520"/>
@@ -74,16 +261,20 @@
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBox x:Name="TaskSearchBox" Grid.Column="0" Height="30" ToolTip="Tìm mã Task ID" TextChanged="TaskSearch_Changed"/>
-                <ComboBox x:Name="TaskFilterBox" Grid.Column="1" Width="115" Margin="7,0,0,0"
+                <ComboBox x:Name="TaskFilterBox" Style="{StaticResource TbrainTaskFilterComboStyle}" Grid.Column="1" Width="115" Margin="7,0,0,0"
                           SelectionChanged="TaskFilter_Changed" SelectedIndex="0">
-                  <ComboBoxItem Content="Tất cả" Tag="all"/>
-                  <ComboBoxItem Content="Chưa quay" Tag="pending"/>
-                  <ComboBoxItem Content="Đã quay" Tag="done"/>
+                  <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="Tất cả" Tag="all"/>
+                  <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="Chưa quay" Tag="pending"/>
+                  <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="Đã quay" Tag="done"/>
                 </ComboBox>
               </Grid>
               <ListBox x:Name="TaskListBox" Height="168" Margin="0,7,0,7"
                        Background="#0A172C" Foreground="#F2F7FF" BorderBrush="#2E527D"
-                       SelectionChanged="TaskList_SelectionChanged" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                       SelectionChanged="TaskList_SelectionChanged" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled" ItemContainerStyle="{StaticResource TbrainTaskRowStyle}">
+                <ListBox.Resources>
+                  <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource TbrainTaskScrollBarStyle}"/>
+                </ListBox.Resources>
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Grid Margin="3,4">
@@ -253,9 +444,9 @@
           <TextBlock Text="Tbrain Work" Foreground="#F4F7FF" FontSize="17" FontWeight="Bold"/>
           <TextBlock Text="Expert workspace · My projects" Foreground="#8FA6CD" FontSize="11"/>
         </StackPanel>
-        <Button x:Name="TbrainLoginButton" DockPanel.Dock="Right" Content="Đăng nhập lại" Margin="4,12,14,12" Padding="12,3" Click="TbrainLogin_Click"/>
-        <Button x:Name="TbrainRefreshButton" DockPanel.Dock="Right" Content="Tải lại" Margin="4,12,4,12" Padding="12,3" Click="TbrainRefresh_Click"/>
-        <Button x:Name="TbrainBackButton" DockPanel.Dock="Right" Content="←" Margin="4,12,4,12" Padding="12,3" Click="TbrainBack_Click"/>
+        <Button x:Name="TbrainLoginButton" Style="{StaticResource TbrainToolbarButtonStyle}" DockPanel.Dock="Right" Content="Đăng nhập lại" Margin="4,12,14,12" Padding="12,3" Click="TbrainLogin_Click"/>
+        <Button x:Name="TbrainRefreshButton" Style="{StaticResource TbrainToolbarButtonStyle}" DockPanel.Dock="Right" Content="Tải lại" Margin="4,12,4,12" Padding="12,3" Click="TbrainRefresh_Click"/>
+        <Button x:Name="TbrainBackButton" Style="{StaticResource TbrainToolbarButtonStyle}" DockPanel.Dock="Right" Content="←" Margin="4,12,4,12" Padding="12,3" Click="TbrainBack_Click"/>
       </DockPanel>
       <wv2:WebView2 x:Name="TbrainBrowser" Grid.Row="1" Loaded="TbrainBrowser_Loaded"/>
       <Border Grid.Row="2" Background="#10213B" Padding="12,8">
