@@ -21,12 +21,21 @@ public partial class MainWindow
                uri.AbsolutePath.StartsWith("/o/oauth2/", StringComparison.OrdinalIgnoreCase)));
     }
 
-    private void OpenExternalSignIn(string url)
+    private void OpenExternalSignIn()
     {
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        TbrainNotice.Text = "Google login opened in your browser. Returning to embedded Tbrain requires a supported authentication callback.";
+        // Open Tbrain's own login page in the user's default browser.
+        // Starting a Google OAuth URL created inside WebView2 in another
+        // browser cannot safely transfer WebView2's state/cookies.
+        Process.Start(new ProcessStartInfo(TbrainUrl) { UseShellExecute = true });
+        TbrainNotice.Text = "Google sign-in must complete in Chrome/Edge. Use Tbrain there; the embedded WebView2 session does not automatically share browser login.";
+        // Cancel the in-WebView OAuth redirect and return to a usable login
+        // screen instead of leaving the Tbrain page stuck on Redirecting.
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!_tbrainResetting && TbrainBrowser.CoreWebView2 is not null)
+                TbrainBrowser.CoreWebView2.Navigate(TbrainUrl);
+        });
     }
-
 
     private async void TbrainPane_Loaded(object sender, RoutedEventArgs e)
     {
@@ -57,7 +66,7 @@ public partial class MainWindow
                 if (IsGoogleSignIn(uri))
                 {
                     args.Cancel = true;
-                    OpenExternalSignIn(uri.AbsoluteUri);
+                    OpenExternalSignIn();
                 }
             };
             web.NewWindowRequested += (_, args) =>
@@ -70,7 +79,7 @@ public partial class MainWindow
             web.NavigationCompleted += (_, args) =>
             {
                 TbrainNotice.Text = args.IsSuccess
-                    ? "Tbrain Work ready. ODX recording and Room remain independent."
+                    ? "Tbrain page loaded. For Google sign-in, use Open in browser; Chrome/Edge login is separate from WebView2. ODX capture and Room remain independent."
                     : "Tbrain did not load. Use Open in browser; ODX capture remains available.";
             };
             web.ProcessFailed += (_, _) =>
