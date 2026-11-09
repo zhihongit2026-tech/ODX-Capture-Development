@@ -1,0 +1,74 @@
+name: Publish ODX 0.3.3 public release (no Room secrets)
+
+on:
+  push:
+    branches:
+      - fix/odx-033-autostop-lastframes
+    paths:
+      - .github/workflows/publish-odx-033-public.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify original Windows candidate passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion="$(gh api repos/${GITHUB_REPOSITORY}/actions/runs/42685934968 --jq '.conclusion')"
+          test "$conclusion" = success
+      - name: Download verified Windows x64 package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh run download 42685934968 --repo "$GITHUB_REPOSITORY" \
+            --name odx-capture-0.3.3-win-x64-candidate --dir dist
+          test -s dist/odx-capture-0.3.3-win-x64.zip
+          unzip -t dist/odx-capture-0.3.3-win-x64.zip >/dev/null
+          sha256sum dist/odx-capture-0.3.3-win-x64.zip
+      - name: Check package does not contain Room access key
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import zipfile,json
+          p="dist/odx-capture-0.3.3-win-x64.zip"
+          with zipfile.ZipFile(p) as z:
+              names=[x for x in z.namelist() if x.endswith("bin/odx-capture.json")]
+              if len(names)!=1: raise SystemExit("Room configuration missing or ambiguous")
+              c=json.loads(z.read(names[0]))
+              if c.get("access_key"): raise SystemExit("Refusing public release with Room access key")
+              print("PASS: no Room access key in public asset")
+          PY
+      - name: Create GitHub Release pointing at approved Windows source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          # ODX Capture 0.3.3 — Room Timer Fix (Windows x64)
+
+          Approved capture build based on commit b46f7133711897b287aa0e1c5e7e9113de88da5d. Builds and automated .NET tests passed.
+
+          - Keeps the ODX Capture 0.3.2 application, Room creation/join, recording settings, video and audio.
+          - F10 starts the 3-2-1 countdown and recording; recording stops automatically after 245 seconds.
+          - Fixes the room recording elapsed-time display and mitigates one unbounded recorder stop wait.
+          - Preserves manual stopping and the 0.3.2 room protocol.
+
+          **Important: public ZIP intentionally does not include the private online Room access key.**
+          Before using Room online, close ODX Capture and copy `bin/odx-capture.json`
+          from your original **0.3.2** package into the extracted **0.3.3** folder's `bin`
+          directory. Do not share this configuration or its access key. For a previously
+          configured private package, continue using that package as your working copy.
+          An unconfigured public package may show "Joining room..." indefinitely.
+
+          **Verification:** Build/CI PASS. Live multiplayer and complete last-frames regression coverage are not asserted by automation; user-tested functions were reported working.
+          EOF
+          gh release create capture-v0.3.3 "dist/odx-capture-0.3.3-win-x64.zip" \
+             --repo "$GITHUB_REPOSITORY" \
+             --target b46f7133711897b287aa0e1c5e7e9113de88da5d \
+             --title "ODX Capture 0.3.3 — Room Timer Fix" \
+             --notes-file release-notes.md
