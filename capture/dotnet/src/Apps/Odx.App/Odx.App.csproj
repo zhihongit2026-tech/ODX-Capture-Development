@@ -30,6 +30,10 @@
     <None Include="../../../../profiles/*.json" Link="games/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../../config/odx-capture.json" Link="odx-capture.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- WebView2 is confined to the new Tbrain pane; recording/Room projects remain unchanged. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
   <!-- Development builds copy odx next to the app, which runs `odx input` and `odx record` as child processes. A
        RID-specific publish (publish.ps1) publishes odx on its own (single file, next to odx-app), so it is left out. -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == ''">
