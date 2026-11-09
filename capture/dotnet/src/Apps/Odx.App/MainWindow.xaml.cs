@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private const int HotkeyId = 1;
     private const uint MOD_NOREPEAT = 0x4000;
     private const int CountdownSeconds = 3;
+    private static readonly TimeSpan AutoStopAfter = TimeSpan.FromSeconds(245);
 
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
@@ -55,6 +56,7 @@ public partial class MainWindow : Window
     private CountdownOverlay? _overlay;
     private int _countdownLeft;
     private DateTime _runStarted;
+    private CancellationTokenSource? _autoStop;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -205,6 +207,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        CancelAutoStop();
         UnregisterHotKey(_hwnd, HotkeyId);
         _tray.Dispose();
         _packets.Dispose();
@@ -338,6 +341,7 @@ public partial class MainWindow : Window
         _state = state;
         if (status is not null) SetStatus(status);
         if (state != RunState.Recording) _clock.Stop();
+        if (state is RunState.Idle or RunState.Stopping) CancelAutoStop();
         bool idle = state == RunState.Idle;
         StartStopButton.Content = state switch
         {
@@ -448,6 +452,7 @@ public partial class MainWindow : Window
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
             SetState(RunState.Recording);
+            ScheduleAutoStop(run);
             _clock.Start();
             ShowRecordingStatus();
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -494,14 +499,45 @@ public partial class MainWindow : Window
             SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
+    private void CancelAutoStop()
+    {
+        var previous = _autoStop;
+        _autoStop = null;
+        previous?.Cancel();
+    }
+
+    private void ScheduleAutoStop(ICaptureRun run)
+    {
+        CancelAutoStop();
+        var cancellation = new CancellationTokenSource();
+        _autoStop = cancellation;
+        _ = AutoStopAsync(run, cancellation.Token);
+    }
+
+    private async Task AutoStopAsync(ICaptureRun run, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(AutoStopAfter, cancellation);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!cancellation.IsCancellationRequested && ReferenceEquals(_run, run) && _state == RunState.Recording)
+                    StopRecording();
+            });
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private void StopRecording()
     {
+        CancelAutoStop();
         SetState(RunState.Stopping, t => t.StoppingStatus);
         _run!.Stop();
     }
 
     private void OnRunCompleted(RunResult result)
     {
+        CancelAutoStop();
         _run = null;
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
