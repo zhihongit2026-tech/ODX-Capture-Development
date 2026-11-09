@@ -74,7 +74,7 @@ public partial class MainWindow
                 args.Handled = true;
                 if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) &&
                     uri.Scheme == Uri.UriSchemeHttps)
-                    OpenExternalSignIn(uri.AbsoluteUri);
+                    OpenExternalSignIn();
             };
             web.NavigationCompleted += (_, args) =>
             {
