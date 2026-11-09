@@ -57,6 +57,8 @@ public partial class MainWindow : Window
     private int _countdownLeft;
     private DateTime _runStarted;
     private CancellationTokenSource? _autoStop;
+    private CancellationTokenSource? _roomAutoStop;
+    private string? _roomAutoStopSession;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -642,10 +644,12 @@ public partial class MainWindow : Window
             if (_room != room) return;
             if (update is null)
             {
+                CancelRoomAutoStop();
                 Disconnect(t => t.RoomClosed);
                 return;
             }
             RoomBox.Text = update.Code;
+            UpdateRoomAutoStop(room, update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
         });
@@ -702,8 +706,56 @@ public partial class MainWindow : Window
     private static readonly string ZeroTierTray =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ZeroTier", "One", "zerotier_desktop_ui.exe");
 
+    // For an unchanged 0.3.2 online orchestrator, the host supplies the 245-second
+    // stop command to the server. Every member then receives the SAME server Stop
+    // message; upgraded servers may also stop first, in which case this is cancelled.
+    private void UpdateRoomAutoStop(RoomSession room, RoomUpdate update)
+    {
+        if (!room.Agent.IsHost || update.CurrentSession is null)
+        {
+            CancelRoomAutoStop();
+            return;
+        }
+        if (update.Countdown) return; // The 3-2-1 countdown is not part of 245 seconds.
+        if (_roomAutoStopSession == update.CurrentSession) return;
+        CancelRoomAutoStop();
+        string session = update.CurrentSession;
+        var cancel = new CancellationTokenSource();
+        _roomAutoStopSession = session;
+        _roomAutoStop = cancel;
+        _ = StopRoomAfter245Async(room, session, cancel.Token);
+    }
+
+    private async Task StopRoomAfter245Async(RoomSession room, string session, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(AutoStopAfter, cancellation);
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                if (cancellation.IsCancellationRequested || _room != room ||
+                    room.Agent.Room is not { CurrentSession: var current } || current != session ||
+                    !room.Agent.IsHost) return;
+                try { await room.ToggleRoundAsync(0); }
+                catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
+                {
+                    SetStatus(t => t.RoundToggleFailed(e.Message));
+                }
+            });
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void CancelRoomAutoStop()
+    {
+        _roomAutoStop?.Cancel();
+        _roomAutoStop = null;
+        _roomAutoStopSession = null;
+    }
+
     private async void LeaveRoom()
     {
+        CancelRoomAutoStop();
         if (_room is { } room)
         {
             _room = null;  // its RoomChanged(null) is ours, not the host's
@@ -715,6 +767,7 @@ public partial class MainWindow : Window
 
     private async void CloseRoom()
     {
+        CancelRoomAutoStop();
         if (_room is { } room)
         {
             _room = null;
@@ -726,6 +779,7 @@ public partial class MainWindow : Window
 
     private void Disconnect(Func<Strings, string> status)
     {
+        CancelRoomAutoStop();
         _room?.Dispose();
         _room = null;
         if (_run is null) SetState(RunState.Idle, status);
