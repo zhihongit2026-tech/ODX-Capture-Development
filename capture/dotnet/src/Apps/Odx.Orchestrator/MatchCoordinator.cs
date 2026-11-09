@@ -243,6 +243,12 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
         }
         if (effects.Countdown is { } counting)
             _ = Task.Delay(counting.Record.CountdownMs).ContinueWith(_ => CountdownEndedAsync(counting), TaskScheduler.Default).Unwrap();
+        if (effects.TimedRound is { } timed)
+        {
+            double remainingMs = timed.Record.StartUtcMs + 245_000 - NtpResponder.NowUnixMs();
+            _ = Task.Delay(TimeSpan.FromMilliseconds(Math.Max(0, remainingMs)))
+                .ContinueWith(_ => TimedRoundEndedAsync(timed), TaskScheduler.Default).Unwrap();
+        }
     }
 
     private async Task SendAsync(AgentLink link, AgentMessage message)

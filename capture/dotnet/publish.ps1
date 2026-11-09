@@ -59,6 +59,9 @@ $launcherOut = Join-Path $cache 'launcher'
 dotnet publish (Join-Path $root 'src/Apps/Odx.Launcher') -c Release -r win-x64 -p:DebugType=None -p:Version=$Version -o $launcherOut
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish Odx.Launcher failed' }
 Copy-Item (Join-Path $launcherOut 'odx-launcher.exe') (Join-Path $out 'Odx Capture.exe')
+# Keep the 0.3.2 room server/key out of GitHub artifacts. The owner restores it locally from the original ZIP.
+Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.ps1') (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')
+Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.cmd') (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')
 
 $configPath = Join-Path $bin 'odx-capture.json'
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -121,7 +124,7 @@ if (Test-Path $packageZip) { Remove-Item -Force $packageZip }
 # The program and empty data folders only: the data\ of this machine stays out of the package.
 $zip = [IO.Compression.ZipFile]::Open($packageZip, [IO.Compression.ZipArchiveMode]::Create)
 try {
-    foreach ($file in @(Get-Item $launcherExe) + @(Get-ChildItem $bin -Recurse -File)) {
+    foreach ($file in @((Get-Item $launcherExe), (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')), (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd'))) + @(Get-ChildItem $bin -Recurse -File)) {
         $entry = "$name/" + $file.FullName.Substring($out.Length + 1).Replace('\', '/')
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $entry,
             [IO.Compression.CompressionLevel]::Optimal) | Out-Null
