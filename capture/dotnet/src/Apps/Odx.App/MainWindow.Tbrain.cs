@@ -10,6 +10,23 @@ public partial class MainWindow
 {
     private const string TbrainUrl = "https://work.tbrain.ai/login";
     private bool _tbrainInitializing;
+    private bool _tbrainResetting;
+
+    private static bool IsGoogleSignIn(Uri uri)
+    {
+        string host = uri.Host.ToLowerInvariant();
+        return uri.Scheme == Uri.UriSchemeHttps &&
+            (host == "accounts.google.com" || host == "myaccount.google.com" ||
+             ((host == "google.com" || host == "www.google.com") &&
+               uri.AbsolutePath.StartsWith("/o/oauth2/", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void OpenExternalSignIn(string url)
+    {
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        TbrainNotice.Text = "Google login opened in your browser. Returning to embedded Tbrain requires a supported authentication callback.";
+    }
+
 
     private async void TbrainPane_Loaded(object sender, RoutedEventArgs e)
     {
@@ -35,6 +52,12 @@ public partial class MainWindow
                 {
                     args.Cancel = true;
                     TbrainNotice.Text = "Blocked an unsupported navigation.";
+                    return;
+                }
+                if (IsGoogleSignIn(uri))
+                {
+                    args.Cancel = true;
+                    OpenExternalSignIn(uri.AbsoluteUri);
                 }
             };
             web.NewWindowRequested += (_, args) =>
@@ -42,7 +65,7 @@ public partial class MainWindow
                 args.Handled = true;
                 if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) &&
                     uri.Scheme == Uri.UriSchemeHttps)
-                    Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                    OpenExternalSignIn(uri.AbsoluteUri);
             };
             web.NavigationCompleted += (_, args) =>
             {
@@ -68,12 +91,33 @@ public partial class MainWindow
         }
     }
 
-    private void TbrainReload_Click(object sender, RoutedEventArgs e)
+    private async void TbrainReload_Click(object sender, RoutedEventArgs e)
     {
-        if (TbrainBrowser.CoreWebView2 is null)
+        if (_tbrainResetting) return;
+        var web = TbrainBrowser.CoreWebView2;
+        if (web is null)
+        {
             TbrainPane_Loaded(sender, e);
-        else
-            TbrainBrowser.CoreWebView2.Reload();
+            return;
+        }
+        _tbrainResetting = true;
+        try
+        {
+            TbrainNotice.Text = "Clearing the embedded Tbrain session...";
+            // Clear only the embedded WebView2 profile on an explicit Reload click.
+            // Chrome/Edge, ODX settings, recorder, and Room secrets are not affected.
+            await web.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.AllProfile);
+            web.Navigate(TbrainUrl);
+            TbrainNotice.Text = "Embedded Tbrain session cleared. Sign in again.";
+        }
+        catch (Exception ex)
+        {
+            TbrainNotice.Text = "Could not reset Tbrain sign-in (" + ex.GetType().Name + "). ODX capture is unaffected.";
+        }
+        finally
+        {
+            _tbrainResetting = false;
+        }
     }
 
     private void TbrainExternal_Click(object sender, RoutedEventArgs e)
