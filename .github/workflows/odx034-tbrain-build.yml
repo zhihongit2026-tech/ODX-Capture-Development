@@ -1,0 +1,39 @@
+name: ODX 0.3.4 Tbrain Windows build
+
+on:
+  push:
+    branches:
+      - feature/odx-034-tbrain-workspace
+  workflow_dispatch:
+
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            diffutils
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-pkgconf
+      - name: Build ODX 0.3.4 Windows ZIP and test ffmpeg
+        shell: pwsh
+        run: |
+          $env:MSYS2_ROOT = 'C:\msys64'
+          ./capture/dotnet/publish.ps1 -Version 0.3.4
+      - name: Upload package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: odx-capture-0.3.4-win-x64
+          path: capture/dotnet/dist/odx-capture-0.3.4-win-x64.zip
+          if-no-files-found: error
