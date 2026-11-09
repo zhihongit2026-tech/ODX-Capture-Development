@@ -31,7 +31,10 @@
                 <Setter TargetName="Chrome" Property="Background" Value="#18365E"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Opacity" Value="0.45"/>
+                <Setter TargetName="Chrome" Property="Background" Value="#182B45"/>
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="#314A6D"/>
+                <Setter Property="Foreground" Value="#B8CCEA"/>
+                <Setter Property="Opacity" Value="0.82"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -166,6 +169,84 @@
       </Setter>
     </Style>
 
+
+    <!-- Dedicated dark template for the original ODX language/source/game/FPS selectors.
+         Uses the ComboBox selection template so DisplayMemberPath remains intact. -->
+    <Style x:Key="TbrainSettingsComboStyle" TargetType="{x:Type ComboBox}">
+      <Setter Property="Foreground" Value="#F0F6FF"/>
+      <Setter Property="Background" Value="#192E4E"/>
+      <Setter Property="BorderBrush" Value="#45678E"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Height" Value="30"/>
+      <Setter Property="MinWidth" Value="70"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="ItemContainerStyle" Value="{StaticResource TbrainTaskFilterOptionStyle}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ComboBox}">
+            <Grid SnapsToDevicePixels="True">
+              <ToggleButton x:Name="SettingsToggle" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            Focusable="False" ClickMode="Press"
+                            IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="ComboChrome" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6"/>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="ComboChrome" Property="Background" Value="#254975"/>
+                        <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#688EC5"/>
+                      </Trigger>
+                      <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="ComboChrome" Property="Background" Value="#24446C"/>
+                        <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#75A3E7"/>
+                      </Trigger>
+                      <Trigger Property="IsEnabled" Value="False">
+                        <Setter TargetName="ComboChrome" Property="Background" Value="#1A2D49"/>
+                        <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#395372"/>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter x:Name="SelectedContent" Content="{TemplateBinding SelectionBoxItem}"
+                                ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                TextElement.Foreground="#EFF6FF"
+                                Margin="10,2,28,2" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                IsHitTestVisible="False" ClipToBounds="True"/>
+              <Path Data="M 0 0 L 4 4 L 8 0" Stroke="#B6D0F4" StrokeThickness="1.8"
+                    HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"
+                    IsHitTestVisible="False"/>
+              <Popup x:Name="PART_Popup" Placement="Bottom" Focusable="False"
+                     AllowsTransparency="True" PopupAnimation="Fade"
+                     IsOpen="{TemplateBinding IsDropDownOpen}">
+                <Border Background="#122642" BorderBrush="#52759F" BorderThickness="1"
+                        CornerRadius="7" Padding="3" Margin="0,3,0,0"
+                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                        MaxHeight="300">
+                  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                CanContentScroll="True">
+                    <ScrollViewer.Resources>
+                      <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource TbrainTaskScrollBarStyle}"/>
+                    </ScrollViewer.Resources>
+                    <ItemsPresenter/>
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="SelectedContent" Property="TextElement.Foreground" Value="#BDD0EB"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="TbrainTaskRowStyle" TargetType="{x:Type ListBoxItem}">
       <Setter Property="Foreground" Value="#EAF3FF"/>
       <Setter Property="Padding" Value="3,1"/>
@@ -200,6 +281,7 @@
     </Grid.ColumnDefinitions>
     <Grid Grid.Column="0" Background="#0A1323">
       <Grid.Resources>
+        <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource TbrainTaskScrollBarStyle}"/>
         <Style TargetType="Label">
           <Setter Property="Foreground" Value="#C8D8F4"/>
           <Setter Property="Margin" Value="0,0,7,7"/>
@@ -378,23 +460,23 @@
                   <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 <Label x:Name="LanguageLabel" Grid.Row="0" />
-        <ComboBox x:Name="LanguageBox" AutomationProperties.AutomationId="LanguageBox" Grid.Row="0" Grid.Column="1"
+        <ComboBox x:Name="LanguageBox" Style="{StaticResource TbrainSettingsComboStyle}" AutomationProperties.AutomationId="LanguageBox" Grid.Row="0" Grid.Column="1"
                   Margin="0,0,0,6" Width="140" HorizontalAlignment="Left" DisplayMemberPath="Name"
                   SelectionChanged="Language_Changed" />
 
 <Label x:Name="SourceLabel" Grid.Row="1" />
-        <ComboBox x:Name="SourceBox" AutomationProperties.AutomationId="SourceBox" Grid.Row="1" Grid.Column="1"
+        <ComboBox x:Name="SourceBox" Style="{StaticResource TbrainSettingsComboStyle}" AutomationProperties.AutomationId="SourceBox" Grid.Row="1" Grid.Column="1"
                   Margin="0,0,0,6" DisplayMemberPath="Label" />
-        <Button x:Name="RefreshButton" Grid.Row="1" Grid.Column="2" Click="Refresh_Click" />
+        <Button x:Name="RefreshButton" Style="{StaticResource TbrainToolbarButtonStyle}" Grid.Row="1" Grid.Column="2" Click="Refresh_Click" />
 
 <Label x:Name="GameLabel" Grid.Row="2" />
-        <ComboBox x:Name="GameBox" AutomationProperties.AutomationId="GameBox" Grid.Row="2" Grid.Column="1"
+        <ComboBox x:Name="GameBox" Style="{StaticResource TbrainSettingsComboStyle}" AutomationProperties.AutomationId="GameBox" Grid.Row="2" Grid.Column="1"
                   SelectionChanged="Game_Changed"
                   Margin="0,0,0,6" DisplayMemberPath="Label" />
 
 <Label x:Name="FpsLabel" Grid.Row="3" />
         <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
-            <ComboBox x:Name="FpsBox" Width="80" />
+            <ComboBox x:Name="FpsBox" Style="{StaticResource TbrainSettingsComboStyle}" Width="80" />
             <CheckBox x:Name="AudioBox" AutomationProperties.AutomationId="AudioBox" Margin="12,0,0,0"
                       VerticalAlignment="Center" />
         </StackPanel>
