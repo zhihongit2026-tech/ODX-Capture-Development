@@ -42,7 +42,7 @@
         </Style>
         <Style TargetType="ComboBox">
           <Setter Property="Background" Value="#22395A"/>
-          <Setter Property="Foreground" Value="#182A43"/>
+          <Setter Property="Foreground" Value="#EDF5FF"/>
           <Setter Property="BorderBrush" Value="#476C9A"/>
         </Style>
       </Grid.Resources>
