@@ -1,9 +1,34 @@
 <Window x:Class="Odx.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Odx Capture" Icon="odx.ico" Width="560" SizeToContent="Height" ResizeMode="CanMinimize"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="ODX Capture 0.3.4 | Tbrain Work" Icon="odx.ico" Width="1600" Height="900" MinWidth="1080" MinHeight="650" ResizeMode="CanResize" Background="#070D18"
         WindowStartupLocation="CenterScreen">
     <!-- Texts come from Strings (English / Vietnamese), set in code-behind. -->
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="35*" MinWidth="505"/>
+        <ColumnDefinition Width="6"/>
+        <ColumnDefinition Width="65*" MinWidth="550"/>
+      </Grid.ColumnDefinitions>
+      <!-- Tbrain-inspired workspace chrome; original ODX controls are preserved. -->
+      <Grid Grid.Column="0" Background="#0D1627">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="58"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <DockPanel Grid.Row="0" Background="#111F37" LastChildFill="True">
+          <Border DockPanel.Dock="Left" Margin="16,12,8,12" CornerRadius="5" Background="#285DF2" Width="31">
+            <TextBlock Text="●" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16"/>
+          </Border>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="ODX Capture" FontSize="17" Foreground="#F4F7FF" FontWeight="Bold"/>
+            <TextBlock Text="Tbrain Integrated Workspace" FontSize="11" Foreground="#8FA6CD"/>
+          </StackPanel>
+        </DockPanel>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+          <Border Background="#F7F9FE" Margin="12" CornerRadius="10" Padding="0">
     <Grid Margin="16">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
@@ -109,5 +134,34 @@
 
         <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText" Grid.Row="10"
                    Grid.ColumnSpan="3" TextWrapping="Wrap" />
+    </Grid>
+          </Border>
+        </ScrollViewer>
+        <Border Grid.Row="2" Background="#111F37" Padding="14,9">
+          <TextBlock Foreground="#B8C9E7" FontSize="11" Text="ODX 0.3.3 recording &amp; Room engine · unchanged"/>
+        </Border>
+      </Grid>
+      <GridSplitter Grid.Column="1" Width="6" Background="#32557A" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ShowsPreview="True"/>
+      <Grid Grid.Column="2" Background="#080E1B">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="58"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <DockPanel Grid.Row="0" Background="#111F37" LastChildFill="False">
+          <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" Margin="16,0,8,0">
+            <TextBlock Text="Tbrain Work" Foreground="#F4F7FF" FontSize="17" FontWeight="Bold"/>
+            <TextBlock Text="Expert workspace · My projects" Foreground="#8FA6CD" FontSize="11"/>
+          </StackPanel>
+          <Button x:Name="TbrainLoginButton" DockPanel.Dock="Right" Content="Đăng nhập lại" Margin="4,12,14,12" Padding="12,3" Click="TbrainLogin_Click"/>
+          <Button x:Name="TbrainRefreshButton" DockPanel.Dock="Right" Content="Tải lại" Margin="4,12,4,12" Padding="12,3" Click="TbrainRefresh_Click"/>
+          <Button x:Name="TbrainBackButton" DockPanel.Dock="Right" Content="←" Margin="4,12,4,12" Padding="12,3" Click="TbrainBack_Click"/>
+        </DockPanel>
+        <wv2:WebView2 x:Name="TbrainBrowser" Grid.Row="1" Loaded="TbrainBrowser_Loaded"/>
+        <Border Grid.Row="2" Background="#111F37" Padding="12,8">
+          <TextBlock x:Name="TbrainNotice" Foreground="#B8C9E7" FontSize="11" TextWrapping="Wrap"
+                     Text="Website Tbrain tải trong ứng dụng · Phiên web tách biệt với dữ liệu ODX"/>
+        </Border>
+      </Grid>
     </Grid>
 </Window>
