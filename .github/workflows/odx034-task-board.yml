@@ -27,7 +27,7 @@ jobs:
           $changed = git diff --name-only b46f7133711897b287aa0e1c5e7e9113de88da5d HEAD
           foreach ($path in $changed) {
             if ($path -notmatch '^capture/dotnet/src/Apps/Odx.App/(MainWindow.xaml|MainWindow.TaskBoard.cs|MainWindow.TbrainUnified.cs|Odx.App.csproj)$' -and
-                $path -notmatch '^[.]github/workflows/odx034-task-board.yml$') {
+                $path -notmatch '^[.]github/workflows/odx034-(task-board|unified-tbrain).yml$') {
               throw "Unexpected change outside UI integration: $path"
             }
           }
