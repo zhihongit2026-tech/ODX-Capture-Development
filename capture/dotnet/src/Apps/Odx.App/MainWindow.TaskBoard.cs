@@ -382,7 +382,6 @@ public partial class MainWindow
         {
             TaskElapsedText.Text = "00:00:00";
             TaskRecordingHint.Text = "Sẵn sàng · chọn Task ID rồi bắt đầu ghi bằng nút hoặc F10.";
-            ApplyTaskToHostIfSafe();
             return;
         }
         var elapsed = DateTime.Now - _runStarted;
