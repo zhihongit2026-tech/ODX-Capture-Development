@@ -215,7 +215,7 @@
               <ContentPresenter x:Name="SelectedContent" Content="{TemplateBinding SelectionBoxItem}"
                                 ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                 TextElement.Foreground="#EFF6FF"
-                                Margin="10,2,28,2" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Margin="10,2,28,2" HorizontalAlignment="Stretch" VerticalAlignment="Center"
                                 IsHitTestVisible="False" ClipToBounds="True"/>
               <Path Data="M 0 0 L 4 4 L 8 0" Stroke="#B6D0F4" StrokeThickness="1.8"
                     HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"
@@ -393,37 +393,45 @@
           <Border Background="#14243D" CornerRadius="10" Padding="12" Margin="0,0,0,12">
             <StackPanel>
               <TextBlock Text="ROOM ONLINE" Foreground="#F0F6FF" FontSize="13" FontWeight="Bold" Margin="0,0,0,9"/>
-              <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                <Grid>
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-                  </Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<Label x:Name="PlayerLabel" Grid.Row="0" />
-        <StackPanel x:Name="PlayerPanel" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">
-            <TextBox x:Name="PlayerBox" AutomationProperties.AutomationId="PlayerBox" Width="150" VerticalContentAlignment="Center" />
-            <Label x:Name="NameLabel" Margin="12,0,8,0" />
-            <TextBox x:Name="NameBox" AutomationProperties.AutomationId="NameBox" Width="150" VerticalContentAlignment="Center" />
-        </StackPanel>
-
-<Label x:Name="RoomLabel" Grid.Row="1" />
-        <StackPanel x:Name="RoomPanel" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">
-            <!-- The current room's invite code, selectable so the host can copy it; the code to join is asked in a dialog. -->
-            <TextBox x:Name="RoomBox" AutomationProperties.AutomationId="RoomBox" Width="110" IsReadOnly="True"
-                     Visibility="Collapsed" FontFamily="Consolas" FontSize="14" FontWeight="SemiBold"
-                     VerticalContentAlignment="Center" HorizontalContentAlignment="Center" />
-            <!-- The host names each round (the folder every player's capture and the delivered session get). -->
-            <TextBlock x:Name="TaskLabel" Visibility="Collapsed" VerticalAlignment="Center" Margin="12,0,4,0" />
-            <TextBox x:Name="TaskBox" AutomationProperties.AutomationId="TaskBox" Width="150" Visibility="Collapsed"
-                     VerticalContentAlignment="Center" Margin="0,0,12,0" />
-            <Button x:Name="JoinButton" AutomationProperties.AutomationId="JoinButton" Click="Join_Click" />
-            <Button x:Name="CreateButton" AutomationProperties.AutomationId="CreateButton" Click="Create_Click" />
-            <!-- Shown while the Windows clock is off NTP: runs odx clock-sync as administrator. -->
-            <Button x:Name="SyncClockButton" AutomationProperties.AutomationId="SyncClockButton" Visibility="Collapsed"
-                    Click="SyncClock_Click" />
-        </StackPanel>
-                </Grid>
-              </ScrollViewer>
+              <Grid Margin="0,2,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Label x:Name="PlayerLabel" Grid.Row="0" Grid.Column="0" VerticalAlignment="Top" Padding="1,5,8,0"/>
+                <WrapPanel x:Name="PlayerPanel" Grid.Row="0" Grid.Column="1"
+                           Orientation="Horizontal" Margin="0,0,0,7">
+                  <TextBox x:Name="PlayerBox" AutomationProperties.AutomationId="PlayerBox"
+                           Width="132" Margin="0,0,7,5" MinHeight="28" VerticalContentAlignment="Center"/>
+                  <Label x:Name="NameLabel" Margin="0,0,5,5" Padding="0,5,0,0"/>
+                  <TextBox x:Name="NameBox" AutomationProperties.AutomationId="NameBox"
+                           Width="132" Margin="0,0,4,5" MinHeight="28" VerticalContentAlignment="Center"/>
+                </WrapPanel>
+                <Label x:Name="RoomLabel" Grid.Row="1" Grid.Column="0" VerticalAlignment="Top" Padding="1,5,8,0"/>
+                <WrapPanel x:Name="RoomPanel" Grid.Row="1" Grid.Column="1"
+                           Orientation="Horizontal" Margin="0,0,0,1">
+                  <TextBox x:Name="RoomBox" AutomationProperties.AutomationId="RoomBox"
+                           Width="95" IsReadOnly="True" Visibility="Collapsed"
+                           FontFamily="Consolas" FontSize="14" FontWeight="SemiBold"
+                           MinHeight="29" Margin="0,0,7,5"
+                           VerticalContentAlignment="Center" HorizontalContentAlignment="Center"/>
+                  <TextBlock x:Name="TaskLabel" Visibility="Collapsed"
+                             VerticalAlignment="Center" Foreground="#BDD2F0" Margin="0,0,5,5"/>
+                  <TextBox x:Name="TaskBox" AutomationProperties.AutomationId="TaskBox"
+                           Width="140" Visibility="Collapsed" MinHeight="29"
+                           VerticalContentAlignment="Center" Margin="0,0,7,5"/>
+                  <Button x:Name="JoinButton" AutomationProperties.AutomationId="JoinButton"
+                          Click="Join_Click" Margin="0,0,6,5" Padding="10,6"/>
+                  <Button x:Name="CreateButton" AutomationProperties.AutomationId="CreateButton"
+                          Click="Create_Click" Margin="0,0,6,5" Padding="10,6"/>
+                  <Button x:Name="SyncClockButton" AutomationProperties.AutomationId="SyncClockButton"
+                          Visibility="Collapsed" Click="SyncClock_Click" Margin="0,0,6,5" Padding="10,6"/>
+                </WrapPanel>
+              </Grid>
             </StackPanel>
           </Border>
           <!-- Capture controls: original state/StartStop button are retained. -->
@@ -449,10 +457,9 @@
           <!-- Settings remain accessible but need not consume workspace height. -->
           <Expander Header="CÀI ĐẶT GHI HÌNH  ·  Nguồn / FPS / Âm thanh / F10" IsExpanded="False"
                     Foreground="#F0F6FF" Background="#14243D" BorderBrush="#2A4D7B" BorderThickness="1" Padding="9,10">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-              <Grid Margin="4,8,4,4">
+            <Grid Margin="4,8,4,4">
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="118"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                   <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
@@ -488,14 +495,14 @@
         <!-- OBS connection row: shown only while "Record with OBS" is ticked. -->
 
 <Label x:Name="ObsConnectionLabel" Grid.Row="5" />
-        <StackPanel x:Name="ObsConnectionPanel" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+        <WrapPanel x:Name="ObsConnectionPanel" Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
             <TextBlock x:Name="ObsAddressLabel" VerticalAlignment="Center" Margin="0,0,4,0" />
             <TextBox x:Name="ObsAddressBox" AutomationProperties.AutomationId="ObsAddressBox" Width="120"
                      VerticalContentAlignment="Center" />
             <TextBlock x:Name="ObsPasswordLabel" VerticalAlignment="Center" Margin="12,0,4,0" />
             <PasswordBox x:Name="ObsPasswordBox" AutomationProperties.AutomationId="ObsPasswordBox" Width="100"
                          VerticalContentAlignment="Center" />
-        </StackPanel>
+        </WrapPanel>
         <Button x:Name="ObsTestButton" AutomationProperties.AutomationId="ObsTestButton" Grid.Row="5" Grid.Column="2"
                 Click="ObsTest_Click" />
 
@@ -506,8 +513,7 @@
                  Margin="0,0,0,6" IsReadOnly="True" IsReadOnlyCaretVisible="False" VerticalContentAlignment="Center"
                  GotKeyboardFocus="Hotkey_GotFocus" LostKeyboardFocus="Hotkey_LostFocus"
                  PreviewKeyDown="Hotkey_PreviewKeyDown" />
-              </Grid>
-            </ScrollViewer>
+            </Grid>
           </Expander>
         </StackPanel>
       </ScrollViewer>
