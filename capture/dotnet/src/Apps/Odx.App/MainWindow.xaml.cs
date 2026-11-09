@@ -342,7 +342,11 @@ public partial class MainWindow : Window
     {
         _state = state;
         if (status is not null) SetStatus(status);
-        if (state != RunState.Recording) _clock.Stop();
+        // A room capture stays in RunState.Agent, even while its recorder is active.
+        // RoomChanged calls SetState(Agent) frequently; do not freeze the elapsed timer.
+        bool capturing = state == RunState.Recording || state == RunState.Agent && _run is not null;
+        if (!capturing) _clock.Stop();
+        else if (_run is not null && !_clock.IsEnabled) _clock.Start();
         if (state is RunState.Idle or RunState.Stopping) CancelAutoStop();
         bool idle = state == RunState.Idle;
         StartStopButton.Content = state switch
@@ -652,6 +656,7 @@ public partial class MainWindow : Window
             UpdateRoomAutoStop(room, update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
+            else ShowRecordingStatus();
         });
         agent.RoomError += error => Dispatcher.BeginInvoke(() =>
         {
