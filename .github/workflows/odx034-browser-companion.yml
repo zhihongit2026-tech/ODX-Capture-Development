@@ -1,0 +1,56 @@
+name: ODX 0.3.4 Tbrain Browser Companion Windows candidate
+
+on:
+  push:
+    branches: [feature/odx-034-browser-side-by-side]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Fetch 0.3.3 Windows candidate assets from successful run
+        uses: actions/download-artifact@v4
+        with:
+          name: odx-capture-0.3.3-win-x64-candidate
+          run-id: 42685934968
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: inherited
+      - name: Rebuild 0.3.4 app only and preserve 0.3.3 recording/Room binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $oldZip = Get-ChildItem inherited -Filter '*.zip' -Recurse -File | Select-Object -First 1
+          if ($null -eq $oldZip) { throw 'No 0.3.3 candidate ZIP in the verified artifact' }
+          New-Item -ItemType Directory -Force staging | Out-Null
+          Expand-Archive -LiteralPath $oldZip.FullName -DestinationPath staging
+          $root = Get-ChildItem staging -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin/odx.exe') } | Select-Object -First 1
+          if ($null -eq $root) { throw 'Original 0.3.3 package is incomplete' }
+          $bin = Join-Path $root.FullName 'bin'
+          foreach ($required in @('odx.exe', 'ffmpeg/ffmpeg.exe', 'odx-capture.json')) {
+            if (-not (Test-Path (Join-Path $bin $required))) { throw "Missing original recording asset: $required" }
+          }
+          dotnet publish ./capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.4 -o newapp
+          if ($LASTEXITCODE -ne 0) { throw 'App rebuild failed' }
+          foreach ($file in (Get-ChildItem newapp -File)) {
+            if ($file.Name -eq 'odx-capture.json') { continue }
+            Copy-Item $file.FullName -Destination (Join-Path $bin $file.Name) -Force
+          }
+          if (-not (Test-Path (Join-Path $bin 'odx-app.exe'))) { throw '0.3.4 application missing after rebuild' }
+          Rename-Item -LiteralPath $root.FullName -NewName 'odx-capture-0.3.4-win-x64'
+          Compress-Archive -Path 'staging/odx-capture-0.3.4-win-x64' -DestinationPath 'odx-capture-0.3.4-win-x64.zip' -CompressionLevel Optimal
+          Get-FileHash 'odx-capture-0.3.4-win-x64.zip' -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odx-capture-0.3.4-browser-companion
+          path: odx-capture-0.3.4-win-x64.zip
+          if-no-files-found: error
