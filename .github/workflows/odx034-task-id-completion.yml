@@ -1,0 +1,90 @@
+name: ODX 0.3.4 Task ID completion Windows candidate
+
+on:
+  push:
+    branches: [feature/odx-034-task-id-completion]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify approved Task Board/UI changes only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changed = git diff --name-only e1dc46997683ae202e991e9e2412fe8f86275028 HEAD
+          foreach ($path in $changed) {
+            if ($path -ne 'capture/dotnet/src/Apps/Odx.App/MainWindow.xaml' -and
+                $path -ne 'capture/dotnet/src/Apps/Odx.App/MainWindow.xaml.cs' -and
+                $path -ne 'capture/dotnet/src/Apps/Odx.App/MainWindow.TaskBoard.cs' -and
+                $path -ne '.github/workflows/odx034-task-id-completion.yml') {
+              throw "Unexpected change outside approved Task ID/UI scope: $path"
+            }
+          }
+      - name: Install FFmpeg for regression tests
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+      - name: Build and run original ODX regression tests
+        shell: pwsh
+        working-directory: capture/dotnet
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'ODX solution compile failed' }
+          dotnet test OdxCapture.sln -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'ODX regression tests failed' }
+      - name: Fetch verified ODX 0.3.3 Windows candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: odx-capture-0.3.3-win-x64-candidate
+          run-id: 42685934968
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: inherited
+      - name: Rebuild ODX 0.3.4 app and preserve original capture/Room binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $oldZip = Get-ChildItem inherited -Filter '*.zip' -Recurse -File | Select-Object -First 1
+          if ($null -eq $oldZip) { throw 'No verified 0.3.3 candidate ZIP was downloaded' }
+          New-Item -ItemType Directory -Force staging | Out-Null
+          Expand-Archive -LiteralPath $oldZip.FullName -DestinationPath staging
+          $root = Get-ChildItem staging -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin/odx.exe') } | Select-Object -First 1
+          if ($null -eq $root) { throw 'Original 0.3.3 package is incomplete' }
+          $bin = Join-Path $root.FullName 'bin'
+          foreach ($required in @('odx.exe', 'ffmpeg/ffmpeg.exe', 'odx-capture.json')) {
+            if (-not (Test-Path (Join-Path $bin $required))) { throw "Missing original 0.3.3 asset: $required" }
+          }
+          $coreBefore = @{}
+          foreach ($relative in @('odx.exe','ffmpeg/ffmpeg.exe','odx-capture.json')) {
+            $coreBefore[$relative] = (Get-FileHash (Join-Path $bin $relative) -Algorithm SHA256).Hash
+          }
+          dotnet publish ./capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.4 -o newapp
+          if ($LASTEXITCODE -ne 0) { throw 'ODX 0.3.4 app publish failed' }
+          foreach ($file in (Get-ChildItem newapp -File)) {
+            if ($file.Name -eq 'odx-capture.json') { continue }
+            Copy-Item $file.FullName -Destination (Join-Path $bin $file.Name) -Force
+          }
+          if (-not (Test-Path (Join-Path $bin 'odx-app.exe'))) { throw 'ODX 0.3.4 app executable missing' }
+          foreach ($relative in $coreBefore.Keys) {
+            $after = (Get-FileHash (Join-Path $bin $relative) -Algorithm SHA256).Hash
+            if ($after -ne $coreBefore[$relative]) { throw "Original 0.3.3 asset changed: $relative" }
+          }
+          Rename-Item -LiteralPath $root.FullName -NewName 'odx-capture-0.3.4-task-id-completion-win-x64'
+          Compress-Archive -Path 'staging/odx-capture-0.3.4-task-id-completion-win-x64' -DestinationPath 'odx-capture-0.3.4-task-id-completion-win-x64.zip' -CompressionLevel Optimal
+          Get-FileHash 'odx-capture-0.3.4-task-id-completion-win-x64.zip' -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odx-capture-0.3.4-task-id-completion
+          path: odx-capture-0.3.4-task-id-completion-win-x64.zip
+          if-no-files-found: error
