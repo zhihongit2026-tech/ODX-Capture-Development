@@ -16,6 +16,10 @@ public sealed partial class MatchCoordinator
         /// <summary>What is going wrong with its recording (<see cref="AgentState.Problem"/>); null while all is well or idle.</summary>
         public string? Problem { get; set; }
         public bool Ready { get; set; }
+        public TeamPreflightSnapshot? Preflight { get; set; }
+        public string? PreflightProblem { get; set; }
+        public PerformanceTelemetry? Performance { get; set; }
+        public DateTime? SevereSinceUtc { get; set; }
         public Room? Room { get; set; }
         /// <summary>ZeroTier node authorized on the room's LAN.</summary>
         public string? LanNode { get; set; }
@@ -32,6 +36,8 @@ public sealed partial class MatchCoordinator
         public string? MatchId { get; set; }
         public string? Map { get; set; }
         public string Game { get; set; } = "";
+        /// <summary>Arma 3 Team 4 standard for the next round; volatile and re-established by preflight after a server restart.</summary>
+        public TeamStandard? TeamStandard { get; set; }
         public int RoundNumber { get; set; }
         public OpenRound? Current { get; set; }
         /// <summary>Events between rounds (match_start, player_ready…); they open the next round's events.</summary>
