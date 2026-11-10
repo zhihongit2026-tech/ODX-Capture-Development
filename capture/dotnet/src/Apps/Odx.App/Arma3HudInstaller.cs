@@ -42,7 +42,7 @@ public static class Arma3HudInstaller
             if (File.Exists(libraryFile))
             {
                 string text = File.ReadAllText(libraryFile);
-                foreach (Match match in Regex.Matches(text, @"\"path\"\s+\"([^\"]+)\""))
+                foreach (Match match in Regex.Matches(text, @"""path""\s+""([^""]+)"""))
                     libraries.Add(match.Groups[1].Value.Replace(@"\\", @"\").Replace('/', Path.DirectorySeparatorChar));
             }
         }
