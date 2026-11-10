@@ -455,6 +455,9 @@
                   <TextBlock x:Name="TeamPreflightStatus" Foreground="#B9CCEA" FontSize="11"
                              Text="Trưởng nhóm chọn FPS, sau đó từng thành viên kiểm tra cấu hình và READY."
                              TextWrapping="Wrap" Margin="0,7,0,6"/>
+                  <CheckBox x:Name="TacticalPingManualCheckBox" Visibility="Collapsed"
+                            Content="Tôi đã kiểm tra Tactical Ping = Off trên máy này"
+                            Foreground="#F0C878" FontSize="10" Margin="0,0,0,7"/>
                   <ItemsControl x:Name="TeamMembersPanel">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
