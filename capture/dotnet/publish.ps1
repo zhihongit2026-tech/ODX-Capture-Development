@@ -29,8 +29,9 @@ $cache = Join-Path $root '.cache'
 
 $bin = Join-Path $out 'bin'
 $launcherExe = Join-Path $out 'Odx Capture.exe'
+$arma3Mod = Join-Path $out '@ODX_HUD'
 # data\ holds what this machine recorded and delivered (PackageFolders): a rebuild replaces the program, never the data.
-foreach ($old in @($bin, $launcherExe)) { if (Test-Path $old) { Remove-Item -Recurse -Force $old } }
+foreach ($old in @($bin, $launcherExe, $arma3Mod)) { if (Test-Path $old) { Remove-Item -Recurse -Force $old } }
 New-Item -ItemType Directory -Force $out, $bin, $cache, (Join-Path $out 'data\captures'), (Join-Path $out 'data\delivery') | Out-Null
 # NativeAOT finds the MSVC linker through vswhere.exe, which is not on PATH by default.
 $env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"
@@ -62,6 +63,18 @@ Copy-Item (Join-Path $launcherOut 'odx-launcher.exe') (Join-Path $out 'Odx Captu
 # Keep the 0.3.2 room server/key out of GitHub artifacts. The owner restores it locally from the original ZIP.
 Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.ps1') (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')
 Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.cmd') (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')
+
+# Package the Arma 3 client addon as a local mod. The PBO prefix must remain "odx_hud"
+# because CfgFunctions resolves \\odx_hud\\functions inside the PBO.
+$addonSource = Join-Path $root '..\arma3\odx_hud'
+$packPbo = Join-Path $root '..\deploy\aws\arma3\pack_pbo.py'
+$modAddons = Join-Path $arma3Mod 'addons'
+New-Item -ItemType Directory -Force $modAddons | Out-Null
+$pbo = Join-Path $modAddons 'ODX_HUD.pbo'
+python $packPbo $addonSource $pbo
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pbo)) { throw 'building @ODX_HUD\\addons\\ODX_HUD.pbo failed' }
+Copy-Item (Join-Path $root '..\arma3\README.txt') (Join-Path $arma3Mod 'README.txt')
+Copy-Item (Join-Path $root '..\arma3\README.txt') (Join-Path $out 'ODX_ARMA3_TEAM_SYNC_README.txt')
 
 $configPath = Join-Path $bin 'odx-capture.json'
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -124,7 +137,10 @@ if (Test-Path $packageZip) { Remove-Item -Force $packageZip }
 # The program and empty data folders only: the data\ of this machine stays out of the package.
 $zip = [IO.Compression.ZipFile]::Open($packageZip, [IO.Compression.ZipArchiveMode]::Create)
 try {
-    foreach ($file in @((Get-Item $launcherExe), (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')), (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd'))) + @(Get-ChildItem $bin -Recurse -File)) {
+    $packageFiles = @((Get-Item $launcherExe), (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')),
+        (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')), (Get-Item (Join-Path $out 'ODX_ARMA3_TEAM_SYNC_README.txt'))) +
+        @(Get-ChildItem $bin -Recurse -File) + @(Get-ChildItem $arma3Mod -Recurse -File)
+    foreach ($file in $packageFiles) {
         $entry = "$name/" + $file.FullName.Substring($out.Length + 1).Replace('\', '/')
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $entry,
             [IO.Compression.CompressionLevel]::Optimal) | Out-Null
