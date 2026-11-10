@@ -87,10 +87,14 @@ addMissionEventHandler ["Ended", { [false] call ODX_fnc_setHud; }];
     while { true } do
     {
         private _resolution = getResolution;
-        private _difficulty = _difficultyNames apply
-        {
-            try { difficultyOption _x } catch { -1 }
-        };
+        private _difficulty = [
+            difficultyOption "groupIndicators",
+            difficultyOption "friendlyTags",
+            difficultyOption "enemyTags",
+            difficultyOption "detectedMines",
+            difficultyOption "commands",
+            difficultyOption "waypoints"
+        ];
         private _tacticalPing = -2; // difficultyOption does not expose Tactical Ping; ODX disables its map indicators during capture.
         private _addons = activatedAddons;
         _addons sort true;
