@@ -72,7 +72,6 @@ public sealed class Arma3HudBridge : IDisposable
     private long _rptOffset;
     private long _ackSequence;
     private string? _lastAck;
-    private DateTime _lastAckUtc;
     private Arma3Telemetry? _latest;
 
     public Arma3HudBridge()
@@ -194,7 +193,6 @@ public sealed class Arma3HudBridge : IDisposable
             lock (_ackGate)
             {
                 _lastAck = ack;
-                _lastAckUtc = DateTime.UtcNow;
                 _ackSequence++;
             }
         }
