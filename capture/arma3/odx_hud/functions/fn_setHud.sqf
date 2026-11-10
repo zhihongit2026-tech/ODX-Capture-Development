@@ -11,7 +11,7 @@ if (_hide) exitWith
         false
     };
 
-    if (isNil "ODX_HUD_original") then
+    if (isNil "ODX_HUD_original" || { count ODX_HUD_original == 0 }) then
     {
         ODX_HUD_original = [
             shownHUD,
