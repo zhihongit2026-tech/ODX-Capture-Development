@@ -345,7 +345,6 @@
                 <TextBox x:Name="TaskSearchBox" Grid.Column="0" Height="30" ToolTip="Tìm mã Task ID" TextChanged="TaskSearch_Changed"/>
                 <ComboBox x:Name="TaskFilterBox" Style="{StaticResource TbrainTaskFilterComboStyle}" Grid.Column="1" Width="115" Margin="7,0,0,0"
                           SelectionChanged="TaskFilter_Changed" SelectedIndex="0">
-                  <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="Tất cả" Tag="all"/>
                   <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="Chưa quay" Tag="pending"/>
                   <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="Đã quay" Tag="done"/>
                 </ComboBox>
@@ -375,7 +374,7 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
-              <TextBlock Text="Chọn tự do hoặc nhập Task ID:" Foreground="#B9CCEA" FontSize="11" Margin="0,0,0,5"/>
+              <TextBlock Text="Chọn Task đã đồng bộ hoặc nhập mã Task:" Foreground="#B9CCEA" FontSize="11" Margin="0,0,0,5"/>
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBox x:Name="TaskManualBox" Grid.Column="0" Height="30"
@@ -386,7 +385,7 @@
               <TextBlock x:Name="TaskSelectedText" Foreground="#8FBEFF" FontSize="11" FontWeight="SemiBold"
                          Text="Chưa chọn Task" TextWrapping="Wrap" Margin="0,8,0,0"/>
               <TextBlock x:Name="TaskLocalStatus" Foreground="#AFC0DF" FontSize="11"
-                         Text="Dấu tích là trạng thái quay cục bộ; Submitted không đồng nghĩa đã quay." TextWrapping="Wrap" Margin="0,5,0,0"/>
+                         Text="Chỉ hiện Task đã đồng bộ từ dự án Tbrain đang mở. Tích xong sẽ ẩn khỏi danh sách Chưa quay." TextWrapping="Wrap" Margin="0,5,0,0"/>
             </StackPanel>
           </Border>
           <!-- Room: only the original 0.3.3 WPF controls, relocated unchanged. -->
