@@ -114,19 +114,30 @@ public sealed class Arma3HudBridge : IAsyncDisposable
 
     public TeamPreflightSnapshot ToTeamSnapshot(Arma3PreflightWire wire, int recordingFps)
     {
-        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (wire.Settings.ValueKind == JsonValueKind.Array && wire.Settings.GetArrayLength() > 0)
         {
-            ["difficulty"] = wire.Settings.ValueKind == JsonValueKind.Array && wire.Settings.GetArrayLength() > 0
-                ? wire.Settings[0].GetRawText() : "unavailable",
-            ["video"] = wire.Settings.ValueKind == JsonValueKind.Array && wire.Settings.GetArrayLength() > 1
-                ? wire.Settings[1].GetRawText() : "unavailable"
-        };
+            AddPairs(settings, "difficulty", wire.Settings[0]);
+            if (wire.Settings.GetArrayLength() > 1) AddPairs(settings, "video", wire.Settings[1]);
+        }
         return new TeamPreflightSnapshot(
             wire.GameTitle, wire.GameVersion, wire.ModFingerprint, wire.SettingsFingerprint,
             wire.ScreenWidth, wire.ScreenHeight, wire.AspectRatio, recordingFps,
             wire.HudBridgeVersion, IsConnected && wire.HudBridgeReady,
             wire.HudHidden,
             wire.MissionBlocksHud, settings);
+    }
+
+    private static void AddPairs(Dictionary<string, string> target, string prefix, JsonElement pairs)
+    {
+        if (pairs.ValueKind != JsonValueKind.Array) return;
+        foreach (var pair in pairs.EnumerateArray())
+        {
+            if (pair.ValueKind != JsonValueKind.Array || pair.GetArrayLength() < 2) continue;
+            string? key = pair[0].GetString();
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            target[prefix + "." + key] = pair[1].ToString();
+        }
     }
 
     private async Task ServeAsync(CancellationToken stop)
