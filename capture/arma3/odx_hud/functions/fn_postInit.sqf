@@ -75,15 +75,6 @@ addMissionEventHandler ["Ended", { [false] call ODX_fnc_setHud; }];
 // chat, hint, title, or overlay in the recorded game window.
 0 spawn
 {
-    private _difficultyNames = [
-        "groupIndicators",
-        "friendlyTags",
-        "enemyTags",
-        "detectedMines",
-        "commands",
-        "waypoints"
-    ];
-
     while { true } do
     {
         private _resolution = getResolution;
