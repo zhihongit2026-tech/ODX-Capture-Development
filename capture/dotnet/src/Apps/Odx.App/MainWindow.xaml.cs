@@ -1294,6 +1294,8 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
+            _gameFpsLowSince = _gameFpsCriticalSince = null;
+            _captureFpsLowSince = _captureFpsCriticalSince = null;
             _clock.Start();
             if (_agent?.GameTitle == "Arma 3") _teamMonitorTimer.Start();
             ShowRecordingStatus();
@@ -1309,6 +1311,8 @@ public partial class MainWindow : Window
     {
         _run = null;
         _teamMonitorTimer.Stop();
+        _gameFpsLowSince = _gameFpsCriticalSince = null;
+        _captureFpsLowSince = _captureFpsCriticalSince = null;
         _clock.Stop();
         _ = RestoreArma3HudAsync();
         // The notice comes once the capture is built (RoundKept).
