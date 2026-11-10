@@ -97,7 +97,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 break;
             case CreateRoom:
                 Leave(link, "left_room", effects);
-                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork };
+                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork, Game = _profileGame };
                 _rooms[created.Code] = created;
                 log.LogInformation("room {Room} opened by {Player}{Lan}", created.Code, link.Id,
                     lanNetwork is null ? "" : $", LAN {lanNetwork}");
@@ -362,7 +362,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
                     r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State,
                         a.Problem ?? a.PerformanceProblem, a.Preflight, a.PreflightProblem, a.Performance)).ToList(),
-                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId, r.TeamStandard);
+                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId, r.TeamStandard, r.Game);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();
         }
