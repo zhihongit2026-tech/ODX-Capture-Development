@@ -15,8 +15,31 @@ missionNamespace setVariable ["ODX_HUD_Initialized", true];
     private _lastBridgeError = 0;
 
     private _makeSnapshot = {
-        // Arma 3 2.14+ returns every current difficulty option/value pair, including tacticalPing.
-        private _difficulty = difficultyOption [];
+        private _tacticalPing = "UNVERIFIED";
+        if !(isNil { difficultyOption "tacticalPing" }) then { _tacticalPing = str (difficultyOption "tacticalPing"); };
+        private _difficulty = [
+            ["reducedDamage", difficultyOption "reducedDamage"],
+            ["groupIndicators", difficultyOption "groupIndicators"],
+            ["friendlyTags", difficultyOption "friendlyTags"],
+            ["enemyTags", difficultyOption "enemyTags"],
+            ["detectedMines", difficultyOption "detectedMines"],
+            ["commands", difficultyOption "commands"],
+            ["waypoints", difficultyOption "waypoints"],
+            ["weaponInfo", difficultyOption "weaponInfo"],
+            ["stanceIndicator", difficultyOption "stanceIndicator"],
+            ["staminaBar", difficultyOption "staminaBar"],
+            ["weaponCrosshair", difficultyOption "weaponCrosshair"],
+            ["visionAid", difficultyOption "visionAid"],
+            ["thirdPersonView", difficultyOption "thirdPersonView"],
+            ["cameraShake", difficultyOption "cameraShake"],
+            ["scoreTable", difficultyOption "scoreTable"],
+            ["deathMessages", difficultyOption "deathMessages"],
+            ["vonID", difficultyOption "vonID"],
+            ["mapContent", difficultyOption "mapContent"],
+            ["autoReport", difficultyOption "autoReport"],
+            ["multipleSaves", difficultyOption "multipleSaves"],
+            ["tacticalPing", _tacticalPing]
+        ];
 
         private _video = getVideoOptions;
         private _videoKeys = keys _video;
