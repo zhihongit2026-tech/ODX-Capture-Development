@@ -55,13 +55,19 @@ public sealed class Arma3HudBridge : IAsyncDisposable
     }
 
     public static bool IsArma3Running() =>
-        Process.GetProcessesByName("arma3_x64").Any(HasWindow) ||
-        Process.GetProcessesByName("arma3").Any(HasWindow);
+        HasProcess("arma3_x64") || HasProcess("arma3");
 
-    private static bool HasWindow(Process process)
+    private static bool HasProcess(string name)
     {
-        try { return process.MainWindowHandle != IntPtr.Zero; }
-        catch (InvalidOperationException) { return false; }
+        foreach (var process in Process.GetProcessesByName(name))
+        {
+            using (process)
+            {
+                try { if (!process.HasExited) return true; }
+                catch (InvalidOperationException) { }
+            }
+        }
+        return false;
     }
 
     public async Task<Arma3PreflightWire?> RequestPreflightAsync(TimeSpan? timeout = null, CancellationToken stop = default)
@@ -80,6 +86,7 @@ public sealed class Arma3HudBridge : IAsyncDisposable
     {
         if (!IsConnected) return false;
         if (LastPreflight?.MissionBlocksHud == true) return false;
+        if (LastTelemetry?.HudHidden == true) return true;
         var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_gate) _hudWaiter = waiter;
         _commands.Enqueue("HIDE");
@@ -117,7 +124,7 @@ public sealed class Arma3HudBridge : IAsyncDisposable
             wire.GameTitle, wire.GameVersion, wire.ModFingerprint, wire.SettingsFingerprint,
             wire.ScreenWidth, wire.ScreenHeight, wire.AspectRatio, recordingFps,
             wire.HudBridgeVersion, IsConnected && wire.HudBridgeReady,
-            LastTelemetry?.HudHidden == true || wire.HudHidden,
+            LastTelemetry?.HudHidden ?? wire.HudHidden,
             wire.MissionBlocksHud, settings);
     }
 
