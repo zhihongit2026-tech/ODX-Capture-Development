@@ -160,7 +160,9 @@ public sealed class Arma3HudBridge : IDisposable
                     if (!string.Equals(path, _rptPath, StringComparison.OrdinalIgnoreCase))
                     {
                         _rptPath = path;
-                        _rptOffset = 0;
+                        // Start at the current end: the next heartbeat is fresh and we do not scan
+                        // potentially multi-gigabyte historical RPT logs on application startup.
+                        _rptOffset = new FileInfo(path).Length;
                     }
 
                     using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
