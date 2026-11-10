@@ -18,7 +18,7 @@ class CfgFunctions
         tag = "ODX";
         class HUD
         {
-            file = "\\odx_hud\\functions";
+            file = "\odx_hud\functions";
             class setHud {};
             class postInit
             {
