@@ -34,6 +34,9 @@ if (_hide) exitWith
     // and 3D icons.
     showHUD [false, false, false, false, false, false, false, false, false, false, false];
 
+    // Disable map indicators, including tactical pings, for the capture window.
+    disableMapIndicators [true, true, true, true];
+
     // Additional Player UI switches are separate from the 11 showHUD groups.
     showCompass false;
     showGPS false;
