@@ -431,6 +431,52 @@
                           Visibility="Collapsed" Click="SyncClock_Click" Margin="0,0,6,5" Padding="10,6"/>
                 </WrapPanel>
               </Grid>
+              <Border x:Name="TeamControlPanel" Visibility="Collapsed" Background="#0D1B31"
+                      BorderBrush="#31547E" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,10,0,0">
+                <StackPanel>
+                  <DockPanel Margin="0,0,0,8">
+                    <TextBlock Text="TEAM CONTROL · ARMA 3" Foreground="#EFF6FF" FontWeight="Bold"
+                               FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="TeamReadyCountText" DockPanel.Dock="Right" Foreground="#91B9F2"
+                               FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center"/>
+                  </DockPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <ComboBox x:Name="TeamFpsBox" Style="{StaticResource TbrainSettingsComboStyle}"
+                              Grid.Column="0" Height="30" SelectedValuePath="Tag" SelectedIndex="1">
+                      <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="30 FPS" Tag="30"/>
+                      <ComboBoxItem Style="{StaticResource TbrainTaskFilterOptionStyle}" Content="60 FPS" Tag="60"/>
+                    </ComboBox>
+                    <Button x:Name="ApplyTeamStandardButton" Grid.Column="1" Content="Áp dụng chuẩn đội"
+                            Click="ApplyTeamStandard_Click" Margin="7,0,0,0" Padding="10,5"/>
+                  </Grid>
+                  <TextBlock x:Name="TeamPreflightStatus" Foreground="#B9CCEA" FontSize="11"
+                             Text="Trưởng nhóm chọn FPS, sau đó từng thành viên kiểm tra cấu hình và READY."
+                             TextWrapping="Wrap" Margin="0,7,0,6"/>
+                  <ItemsControl x:Name="TeamMembersPanel">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Background="#14243D" CornerRadius="5" Padding="7,5" Margin="0,2">
+                          <StackPanel>
+                            <DockPanel>
+                              <TextBlock Text="{Binding Name}" Foreground="#EFF6FF" FontWeight="SemiBold" FontSize="11"/>
+                              <TextBlock DockPanel.Dock="Right" Text="{Binding State}" Foreground="#91B9F2" FontSize="10"/>
+                            </DockPanel>
+                            <TextBlock Text="{Binding PreflightProblem}" Foreground="#F0B45A" FontSize="10"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding Problem}" Foreground="#FF8585" FontSize="10"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Foreground="#AFC5E6" FontSize="10">
+                              <Run Text="Game FPS: "/><Run Text="{Binding Performance.GameFps, StringFormat={}{0:0.0}}"/>
+                              <Run Text=" · Record FPS: "/><Run Text="{Binding Performance.RecordingFps, StringFormat={}{0:0.0}}"/>
+                            </TextBlock>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </Border>
           <!-- Capture controls: original state/StartStop button are retained. -->
