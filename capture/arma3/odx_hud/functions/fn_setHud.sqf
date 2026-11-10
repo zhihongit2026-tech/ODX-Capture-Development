@@ -59,17 +59,14 @@ if (ODX_HUD_active) then
 {
     private _original = missionNamespace getVariable ["ODX_HUD_original", []];
 
-    // showHUD exposes a single overall visibility getter, not a getter for each
-    // of its 11 groups. Restore the original overall state; the separate Player
-    // UI switches below are restored individually.
-    if (count _original > 0 && { _original # 0 }) then
+    // shownHUD returns the exact 11-element state; restore it rather than guessing.
+    if (count _original > 0 && { (_original # 0) isEqualType [] } && { count (_original # 0) == 11 }) then
     {
-        showHUD [true, true, true, true, true, true, true, true, true, true, true];
-    }
-    else
-    {
-        showHUD [false, false, false, false, false, false, false, false, false, false, false];
+        showHUD (_original # 0);
     };
+
+    // Restore map indicators after the temporary capture override.
+    disableMapIndicators [false, false, false, false];
 
     if (count _original > 1) then { showCompass (_original # 1); };
     if (count _original > 2) then { showGPS (_original # 2); };
