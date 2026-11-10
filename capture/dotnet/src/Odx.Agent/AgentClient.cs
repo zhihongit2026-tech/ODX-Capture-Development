@@ -144,6 +144,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         return SendAsync(new AgentState(state, "ODX team telemetry", status.ToRoomProblem()), stop);
     }
 
+    /// <summary>Publishes this player's Arma 3 preflight fingerprint while idle, so the host can compare all four clients before starting.</summary>
+    public Task ReportTeamReadyAsync(Arma3TeamStatus status, CancellationToken stop = default) =>
+        SendAsync(new AgentState("team-ready", "Arma 3 preflight", status.ToRoomProblem()), stop);
+
     /// <summary>The capture in progress (odx-app shows its counters); null between sessions.</summary>
     public ICaptureRun? CurrentRun => _run;
 
