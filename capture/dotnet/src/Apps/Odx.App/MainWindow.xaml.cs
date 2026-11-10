@@ -831,6 +831,7 @@ public partial class MainWindow : Window
         {
             _room = null;  // its RoomChanged(null) is ours, not the host's
             await room.LeaveAsync();
+            if (IsArma3Selected) await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(4));
             room.Dispose();
         }
         Disconnect(t => t.LeftRoom);
@@ -843,6 +844,7 @@ public partial class MainWindow : Window
         {
             _room = null;
             await room.CloseAsync();
+            if (IsArma3Selected) await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(4));
             room.Dispose();
         }
         Disconnect(t => t.LeftRoom);
@@ -851,6 +853,7 @@ public partial class MainWindow : Window
     private void Disconnect(Func<Strings, string> status)
     {
         CancelRoomAutoStop();
+        if (IsArma3Selected) _ = _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(3));
         _room?.Dispose();
         _room = null;
         if (_run is null) SetState(RunState.Idle, status);
