@@ -12,6 +12,8 @@ public sealed partial class MatchCoordinator
         room.Members.Add(link);
         link.Room = room;
         link.Ready = false;
+        link.State = "idle";
+        link.Problem = null;
         effects.Changed.Add(room);
         log.LogInformation("{Player} joined room {Room}", link.Id, room.Code);
     }
