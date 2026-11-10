@@ -122,6 +122,31 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     public bool IsHost => Room?.HostPlayerId == options.PlayerId;
 
+    /// <summary>The game title from the orchestrator's profile.</summary>
+    public string? GameTitle { get; private set; }
+
+    /// <summary>The capture FPS sent by the orchestrator for the current round.</summary>
+    public int? ArmedFps => _armed?.Fps;
+
+    /// <summary>Called before a room countdown/capture; false prevents this client from recording.</summary>
+    public Func<CancellationToken, Task<bool>>? PrepareCapture { get; set; }
+
+    /// <summary>Called after every room round path to restore temporary client-side game state.</summary>
+    public Func<CancellationToken, Task>? FinishCapture { get; set; }
+
+    public Task ReportStateAsync(string state, string? detail = null, string? problem = null, CancellationToken stop = default) =>
+        SendAsync(new AgentState(state, detail, problem), stop);
+
+    public Task ReportTeamStatusAsync(Arma3TeamStatus status, CancellationToken stop = default)
+    {
+        string state = _run is null ? "idle" : _run.Phase == CapturePhase.Recording ? "recording" : "saving";
+        return SendAsync(new AgentState(state, "ODX team telemetry", status.ToRoomProblem()), stop);
+    }
+
+    /// <summary>Publishes this player's Arma 3 preflight fingerprint while idle, so the host can compare all four clients before starting.</summary>
+    public Task ReportTeamReadyAsync(Arma3TeamStatus status, CancellationToken stop = default) =>
+        SendAsync(new AgentState("team-ready", "Arma 3 preflight", status.ToRoomProblem()), stop);
+
     /// <summary>The capture in progress (odx-app shows its counters); null between sessions.</summary>
     public ICaptureRun? CurrentRun => _run;
 
@@ -431,6 +456,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 if (w.GameProfileJson is { } welcomeProfile)
                 {
                     var profile = GameProfile.Parse(JsonNode.Parse(welcomeProfile)!.AsObject(), "orchestrator");
+                    GameTitle = profile.GameTitle;
                     _profileWindow = profile.WindowProcess;
                     if (profile.Network is { } network)
                     {
@@ -476,6 +502,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             case Arm a:
                 _armed = a;
                 var armedProfile = GameProfile.Parse(JsonNode.Parse(a.GameProfileJson)!.AsObject(), "orchestrator");
+                GameTitle = armedProfile.GameTitle;
                 _profileWindow = armedProfile.WindowProcess;
                 _armedNetwork = armedProfile.Network;
                 _profilePath = Path.Combine(Path.GetTempPath(), $"odx-agent-{options.PlayerId}-{a.SessionId}.json");
@@ -539,8 +566,50 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     private async Task RecordAsync(Start s, CancellationToken stop)
     {
+        try
+        {
+            await RecordRoundAsync(s, stop);
+        }
+        finally
+        {
+            if (FinishCapture is { } finish)
+            {
+                try { await finish(CancellationToken.None); }
+                catch (Exception e) when (e is WebSocketException or OperationCanceledException or InvalidOperationException)
+                {
+                    Log?.Invoke($"post-round game-state restore: {e.Message}");
+                }
+            }
+        }
+    }
+
+    private async Task RecordRoundAsync(Start s, CancellationToken stop)
+    {
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
+
+        if (PrepareCapture is { } prepare)
+        {
+            bool prepared = false;
+            try { prepared = await prepare(stopped); }
+            catch (Exception e) when (e is WebSocketException or OperationCanceledException or InvalidOperationException)
+            {
+                Log?.Invoke($"round preparation failed: {e.Message}");
+            }
+
+            if (!prepared)
+            {
+                await SendAsync(new AgentState("mismatch|hud", "Arma 3 HUD/preflight was not confirmed"), stop);
+                if (!stopped.IsCancellationRequested)
+                {
+                    try { await Task.Delay(Timeout.Infinite, stopped); }
+                    catch (OperationCanceledException) { }
+                }
+                await EndWithoutCaptureAsync(s.SessionId, "round cancelled because Arma 3 team preflight/HUD hide did not pass", stop, cancelled: true);
+                return;
+            }
+        }
+
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
         string folder = Path.Combine(options.OutputRoot, s.SessionId);
         if (Directory.Exists(folder))

@@ -82,7 +82,7 @@ public sealed partial class MatchCoordinator
     {
         room.RoundNumber = e["round"]?.GetValue<int>() ?? room.RoundNumber + 1;
         string sid = GameEvents.Text(e, "session_id") ?? $"{room.MatchId}-r{room.RoundNumber:D2}";
-        var players = room.Members.Where(a => a.State is "idle" or "armed").ToList();
+        var players = room.Members.Where(a => a.State is "idle" or "armed" or "team-ready").ToList();
         foreach (var busy in room.Members.Except(players))
             log.LogWarning("{Player} is {State}, left out of {Session}", busy.Id, busy.State, sid);
         int countdownMs = e["countdown_ms"]?.GetValue<int>() ?? 0;

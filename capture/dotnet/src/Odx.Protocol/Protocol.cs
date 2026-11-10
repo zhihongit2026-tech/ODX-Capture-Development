@@ -222,8 +222,11 @@ public sealed record RoundFiles(string SessionId, string Round, string Events, s
 {
     public void WriteTo(string dir)
     {
-        File.WriteAllText(Path.Combine(dir, RoundRecord.FileName), Round);
+        // round.json is the completion marker used by consumers/tests to detect that the
+        // complete delivery has arrived. Write the companion files first so no reader can
+        // observe round.json while game_profile.json is still being written.
         File.WriteAllText(Path.Combine(dir, RoundRecord.EventsFileName), Events);
         File.WriteAllText(Path.Combine(dir, RoundRecord.ProfileFileName), GameProfile);
+        File.WriteAllText(Path.Combine(dir, RoundRecord.FileName), Round);
     }
 }
