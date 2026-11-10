@@ -31,7 +31,7 @@ public sealed class TaskBoardEntry : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusText)));
         }
     }
-    public string Key => Scope + "|" + Code + "|" + Part;
+    public string Key => Scope + "|" + Code;
     public string DisplayId => Code + (Part.Length > 0 ? " (" + Part + ")" : "");
     public string StatusText => (OnTbrain ? RemoteStatus switch
     {
@@ -190,8 +190,26 @@ public partial class MainWindow
                 raw, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (snapshot?.Tasks is not { Count: > 0 })
             {
-                if (manual || _taskEntries.Count == 0)
-                    TaskSyncStatus.Text = "Chưa đọc được Task. Hãy mở dự án → tab Tasks rồi bấm Đồng bộ.";
+                // Never leave tasks from a previous Tbrain page/project visible.
+                _taskRebinding = true;
+                try
+                {
+                    _taskEntries.Clear();
+                    _taskScope = "";
+                    _taskStem = "";
+                    RefreshTaskList();
+                    if (_run is null && _state == RunState.Idle)
+                    {
+                        _selectedTaskCode = "";
+                        _selectedTaskPart = "";
+                        _selectedTaskScope = "";
+                        TaskManualBox.Text = "";
+                        TaskBox.Text = "";
+                        UpdateSelectedTaskLabel();
+                    }
+                }
+                finally { _taskRebinding = false; }
+                TaskSyncStatus.Text = "Trang Tbrain hiện tại chưa có danh sách Task. Mở dự án → tab Tasks rồi bấm Đồng bộ.";
                 return;
             }
             ApplyTaskSnapshot(snapshot);
@@ -209,76 +227,80 @@ public partial class MainWindow
         {
             Item = t,
             Match = TaskCodePattern.Match(t.Id.Trim())
-        }).Where(x => x.Match.Success && int.TryParse(x.Match.Groups["index"].Value, out int n)
-            && n is > 0 and <= 999).ToList();
-        if (parsed.Count == 0) return;
-
-        var groups = parsed.GroupBy(x => x.Match.Groups["stem"].Value.ToUpperInvariant())
-                           .OrderByDescending(g => g.Count()).ToList();
-        string stem = groups[0].Key;
-        var tasks = groups[0].ToList();
-        int highest = tasks.Max(x => int.Parse(x.Match.Groups["index"].Value));
-        int displayMax = Math.Min(highest, 200);
-        string scope = (snapshot.Path + "|" + snapshot.Project + "|" + stem).ToUpperInvariant();
-        var identified = tasks.GroupBy(x => x.Item.Id.ToUpperInvariant() + "|" + x.Item.Part.ToUpperInvariant())
-                              .ToDictionary(g => g.Key, g => g.First().Item);
-
-        _taskScope = scope;
-        _taskStem = stem;
-        var rows = new List<TaskBoardEntry>();
-        for (int i = 1; i <= displayMax; i++)
+        }).Where(x => x.Match.Success &&
+            int.TryParse(x.Match.Groups["index"].Value, out int n) && n is > 0 and <= 999).ToList();
+        if (parsed.Count == 0)
         {
-            string code = stem + "-S" + i.ToString("D2");
-            var fromWeb = identified.Where(kv => kv.Value.Id.Equals(code, StringComparison.OrdinalIgnoreCase))
-                                    .Select(kv => kv.Value).ToList();
-            if (fromWeb.Count == 0)
-                rows.Add(new TaskBoardEntry { Code = code, Scope = scope, IsRecorded = Marked(scope, code, "") });
-            else foreach (var web in fromWeb)
-            {
-                string part = web.Part.ToUpperInvariant();
-                rows.Add(new TaskBoardEntry
-                {
-                    Code = code, Part = part, Scope = scope, OnTbrain = true,
-                    RemoteStatus = web.Status,
-                    IsRecorded = Marked(scope, code, part)
-                });
-            }
+            TaskSyncStatus.Text = "Không tìm thấy Task ID hợp lệ trên trang Tbrain hiện tại.";
+            return;
         }
 
-        // A selected local Task may be absent from the currently visible remote rows.
-        if (_selectedTaskCode.Length > 0 && _selectedTaskCode.StartsWith(stem + "-S", StringComparison.OrdinalIgnoreCase)
-            && !rows.Any(row => row.Code == _selectedTaskCode && row.Part == _selectedTaskPart))
-            rows.Add(new TaskBoardEntry { Code = _selectedTaskCode, Part = _selectedTaskPart, Scope = scope,
-                IsRecorded = Marked(scope, _selectedTaskCode, _selectedTaskPart) });
+        // The list must contain only IDs actually returned by the currently open Tbrain project.
+        // Do not synthesize missing Sxx IDs between the smallest and largest values.
+        var stemGroup = parsed.GroupBy(x => x.Match.Groups["stem"].Value.ToUpperInvariant())
+                              .OrderByDescending(g => g.Count()).First();
+        string stem = stemGroup.Key;
+        var tasks = stemGroup
+            .GroupBy(x => x.Item.Id.Trim().ToUpperInvariant())
+            .Select(g => g.First().Item)
+            .OrderBy(item => int.Parse(TaskCodePattern.Match(item.Id).Groups["index"].Value))
+            .ToList();
+
+        string scope = (snapshot.Path + "|" + snapshot.Project + "|" + stem).ToUpperInvariant();
+        _taskScope = scope;
+        _taskStem = stem;
+        var rows = tasks.Select(web => new TaskBoardEntry
+        {
+            Code = web.Id.Trim().ToUpperInvariant(),
+            Part = web.Part.Trim().ToUpperInvariant(),
+            Scope = scope,
+            OnTbrain = true,
+            RemoteStatus = web.Status.Trim(),
+            IsRecorded = Marked(scope, web.Id.Trim().ToUpperInvariant(), web.Part.Trim().ToUpperInvariant())
+        }).ToList();
 
         _taskRebinding = true;
         try
         {
             _taskEntries.Clear();
-            foreach (var row in rows.OrderBy(x => int.Parse(TaskCodePattern.Match(x.Code).Groups["index"].Value))
-                                    .ThenBy(x => x.Part))
-                _taskEntries.Add(row);
+            foreach (var row in rows) _taskEntries.Add(row);
             RefreshTaskList();
-            var selected = _taskEntries.FirstOrDefault(row => row.Code == _selectedTaskCode && row.Part == _selectedTaskPart);
-            if (selected is not null) TaskListBox.SelectedItem = selected;
+
+            var selected = rows.FirstOrDefault(row =>
+                row.Code.Equals(_selectedTaskCode, StringComparison.OrdinalIgnoreCase) &&
+                !row.IsRecorded);
+            if (selected is not null)
+                TaskListBox.SelectedItem = TaskListBox.Items.Cast<TaskBoardEntry>()
+                    .FirstOrDefault(item => item.Key.Equals(selected.Key, StringComparison.OrdinalIgnoreCase));
+            else if (_run is null && rows.Any(row =>
+                         row.Code.Equals(_selectedTaskCode, StringComparison.OrdinalIgnoreCase) && row.IsRecorded))
+            {
+                _selectedTaskCode = "";
+                _selectedTaskPart = "";
+                _selectedTaskScope = "";
+                TaskManualBox.Text = "";
+                TaskBox.Text = "";
+            }
         }
         finally { _taskRebinding = false; }
 
-        TaskSyncStatus.Text = $"{snapshot.Project} · {tasks.Count} Task xác nhận trên trang · hiển thị S01–S{displayMax:D2}"
-            + (highest > displayMax ? " · dải dài: dùng nhập mã cho Task lớn hơn" : "");
+        int done = rows.Count(row => row.IsRecorded);
+        TaskSyncStatus.Text = $"{snapshot.Project} · {rows.Count} Task đã đồng bộ · {rows.Count - done} chưa quay · {done} đã quay";
         UpdateSelectedTaskLabel();
     }
 
     private bool Marked(string scope, string code, string part) =>
-        _localTaskMarks.ContainsKey(scope + "|" + code + "|" + part);
+        _localTaskMarks.ContainsKey(scope + "|" + code) ||
+        _localTaskMarks.ContainsKey(scope + "|" + code + "|" + part) ||
+        _localTaskMarks.Keys.Any(key => key.StartsWith(scope + "|" + code + "|", StringComparison.OrdinalIgnoreCase));
 
     private void RefreshTaskList()
     {
         string query = TaskSearchBox.Text.Trim().ToUpperInvariant();
-        string mode = (TaskFilterBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "all";
+        string mode = (TaskFilterBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "pending";
         var visible = _taskEntries.Where(row =>
             (query.Length == 0 || row.DisplayId.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
-            (mode == "all" || (mode == "done" ? row.IsRecorded : !row.IsRecorded))).ToList();
+            (mode == "done" ? row.IsRecorded : !row.IsRecorded)).ToList();
         // Do not mutate the master list when switching filters.
         TaskListBox.ItemsSource = visible;
     }
@@ -321,24 +343,30 @@ public partial class MainWindow
     private void TaskUse_Click(object sender, RoutedEventArgs e)
     {
         string code = TaskManualBox.Text.Trim().ToUpperInvariant();
-        var match = TaskCodePattern.Match(code);
-        if (!match.Success || !int.TryParse(match.Groups["index"].Value, out int index) || index <= 0)
+        if (!TaskCodePattern.IsMatch(code))
         {
             TaskLocalStatus.Text = "Task ID không hợp lệ. Ví dụ đúng: AMRF-124-S15.";
             return;
         }
-        string scope = _taskScope.Length > 0 ? _taskScope : "MANUAL|" + match.Groups["stem"].Value;
-        TaskBoardEntry? entry = _taskEntries.FirstOrDefault(t => t.Code == code && t.Scope == scope);
+        var entry = _taskEntries.FirstOrDefault(t =>
+            t.Code.Equals(code, StringComparison.OrdinalIgnoreCase) &&
+            t.Scope.Equals(_taskScope, StringComparison.OrdinalIgnoreCase));
         if (entry is null)
         {
-            entry = new TaskBoardEntry { Code = code, Scope = scope, IsRecorded = Marked(scope, code, "") };
-            _taskEntries.Add(entry);
+            TaskLocalStatus.Text = "Task ID này chưa có trong danh sách đã đồng bộ từ dự án Tbrain đang mở.";
+            return;
+        }
+        if (entry.IsRecorded)
+        {
+            TaskLocalStatus.Text = "Task này đã đánh dấu hoàn thành. Chuyển sang bộ lọc Đã quay và bỏ tích nếu muốn quay lại.";
+            return;
         }
         _taskManualEditing = true;
         try { ChooseTask(entry); }
         finally { _taskManualEditing = false; }
         RefreshTaskList();
-        TaskListBox.SelectedItem = TaskListBox.Items.Cast<TaskBoardEntry>().FirstOrDefault(x => x.Key == entry.Key);
+        TaskListBox.SelectedItem = TaskListBox.Items.Cast<TaskBoardEntry>()
+            .FirstOrDefault(x => x.Key.Equals(entry.Key, StringComparison.OrdinalIgnoreCase));
     }
 
     private void ApplyTaskToHostIfSafe()
@@ -364,14 +392,46 @@ public partial class MainWindow
     private void TaskRecorded_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { Tag: TaskBoardEntry entry }) return;
+        if (_run is not null)
+        {
+            TaskLocalStatus.Text = "Hãy kết thúc phiên quay trước khi đánh dấu Task hoàn thành.";
+            return;
+        }
+
         entry.IsRecorded = !entry.IsRecorded;
-        if (entry.IsRecorded) _localTaskMarks[entry.Key] = "manual";
-        else _localTaskMarks.Remove(entry.Key);
+        if (entry.IsRecorded)
+        {
+            _localTaskMarks[entry.Key] = "manual";
+            // Remove legacy per-part keys so a task ID has one completion state.
+            foreach (string legacy in _localTaskMarks.Keys
+                         .Where(key => key.StartsWith(entry.Key + "|", StringComparison.OrdinalIgnoreCase)).ToList())
+                _localTaskMarks.Remove(legacy);
+        }
+        else
+        {
+            _localTaskMarks.Remove(entry.Key);
+            foreach (string legacy in _localTaskMarks.Keys
+                         .Where(key => key.StartsWith(entry.Key + "|", StringComparison.OrdinalIgnoreCase)).ToList())
+                _localTaskMarks.Remove(legacy);
+        }
         SaveTaskMarks();
+
+        if (entry.IsRecorded && _selectedTaskCode.Equals(entry.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedTaskCode = "";
+            _selectedTaskPart = "";
+            _selectedTaskScope = "";
+            TaskManualBox.Text = "";
+            if (_agent?.IsHost == true && _agent.Room?.CurrentSession is null)
+                TaskBox.Text = "";
+            UpdateSelectedTaskLabel();
+        }
+
         TaskLocalStatus.Text = entry.DisplayId + (entry.IsRecorded
-            ? " · Đã đánh dấu quay xong thủ công."
-            : " · Đã bỏ dấu tích, video gốc không bị xóa.");
+            ? " · Đã đánh dấu hoàn thành; Task được ẩn khỏi danh sách Chưa quay."
+            : " · Đã bỏ dấu tích; Task trở lại danh sách Chưa quay. Video cũ không bị xóa.");
         RefreshTaskList();
+        TaskSyncStatus.Text = $"{_taskScope.Split('|').ElementAtOrDefault(1)} · {_taskEntries.Count} Task đã đồng bộ · {_taskEntries.Count(row => !row.IsRecorded)} chưa quay · {_taskEntries.Count(row => row.IsRecorded)} đã quay";
     }
 
     private void UpdateTaskRecordingDisplay()
@@ -398,14 +458,27 @@ public partial class MainWindow
             : "Đang ghi · chưa chọn Task ID để đối chiếu.";
     }
 
-    private void ObserveCapture(ICaptureRun run)
+    private void ObserveCapture(ICaptureRun run, string? taskCode = null, string? taskScope = null, string? taskPart = null)
     {
+        if (ReferenceEquals(_observedCapture, run)) return;
         _observedCapture = run;
-        _pinnedTaskCode = _selectedTaskCode;
-        _pinnedTaskKey = _selectedTaskCode.Length == 0 ? ""
-            : _selectedTaskScope + "|" + _selectedTaskCode + "|" + _selectedTaskPart;
+
+        string code = (taskCode ?? _selectedTaskCode).Trim().ToUpperInvariant();
+        if (!TaskCodePattern.IsMatch(code))
+        {
+            string folder = Path.GetFileName(run.SessionDir);
+            code = TaskCodePattern.IsMatch(folder) ? folder : "";
+        }
+        string stem = code.Length > 0 ? TaskCodePattern.Match(code).Groups["stem"].Value.ToUpperInvariant() : "";
+        string scope = taskScope ?? (_selectedTaskCode.Equals(code, StringComparison.OrdinalIgnoreCase)
+            ? _selectedTaskScope
+            : (_taskStem.Equals(stem, StringComparison.OrdinalIgnoreCase) ? _taskScope : ""));
+        string part = taskPart ?? (_selectedTaskCode.Equals(code, StringComparison.OrdinalIgnoreCase) ? _selectedTaskPart : "");
+        _pinnedTaskCode = code;
+        _pinnedTaskKey = code.Length == 0 ? "" : (scope.Length > 0 ? scope : "MANUAL|" + stem) + "|" + code;
         string pinnedKey = _pinnedTaskKey;
         string pinnedCode = _pinnedTaskCode;
+
         _ = run.Completion.ContinueWith(t =>
         {
             Dispatcher.BeginInvoke(() =>
@@ -420,17 +493,38 @@ public partial class MainWindow
                     File.Exists(video) && new FileInfo(video).Length > 0;
                 if (!verified)
                 {
-                    TaskLocalStatus.Text = pinnedCode + " · Chưa đánh dấu: video chưa được xác minh hợp lệ.";
+                    TaskLocalStatus.Text = pinnedCode + " · Video chưa được xác minh hợp lệ; Task vẫn ở danh sách Chưa quay.";
                     return;
                 }
                 if (pinnedKey.Length == 0) return;
-                _localTaskMarks[pinnedKey] = "verified";
-                SaveTaskMarks();
-                foreach (var item in _taskEntries.Where(e => e.Key.Equals(pinnedKey, StringComparison.OrdinalIgnoreCase)))
-                    item.IsRecorded = true;
-                TaskLocalStatus.Text = pinnedCode + " · ✓ Video đã lưu và xác minh, tự đánh dấu quay xong.";
-                RefreshTaskList();
+                // Completion is deliberately manual: user checks the box after reviewing the saved video.
+                TaskLocalStatus.Text = pinnedCode + " · Video đã lưu và xác minh. Hãy tích ô Task để ẩn khỏi danh sách Chưa quay.";
+                TaskRecordingHint.Text = "Đã lưu video cho " + pinnedCode + " · kiểm tra video rồi tích Task để hoàn thành.";
             });
         }, TaskScheduler.Default);
     }
+
+    private CaptureOptions ApplySelectedTaskFolder(CaptureOptions options)
+    {
+        string taskId = _selectedTaskCode.Trim().ToUpperInvariant();
+        if (!TaskCodePattern.IsMatch(taskId)) return options;
+
+        string folder = Path.Combine(options.OutputRoot, taskId);
+        if (Directory.Exists(folder))
+        {
+            string archiveRoot = Path.Combine(options.OutputRoot, "_previous_takes");
+            Directory.CreateDirectory(archiveRoot);
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
+            string archive = Path.Combine(archiveRoot, taskId + "__" + stamp);
+            int suffix = 1;
+            while (Directory.Exists(archive))
+                archive = Path.Combine(archiveRoot, taskId + "__" + stamp + "-" + suffix++.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Move the previous take out of the active Task folder before recording.
+            // If the move fails, abort instead of risking an overwrite.
+            Directory.Move(folder, archive);
+            TaskLocalStatus.Text = "Đã bảo toàn video cũ tại captures\\_previous_takes\\" + Path.GetFileName(archive);
+        }
+        return options with { DirName = taskId };
+    }
+
 }
