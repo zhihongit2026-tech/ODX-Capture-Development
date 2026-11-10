@@ -279,7 +279,7 @@ public sealed record RoomMember(string PlayerId, string Name, bool Ready, string
 /// <summary>Orchestrator → every member whenever the room changes (members, ready, states, round).</summary>
 /// <param name="LanNetworkId">The room's ZeroTier network to join; null when the room has no LAN.</param>
 public sealed record RoomUpdate(string Code, string? HostPlayerId, List<RoomMember> Members, string? CurrentSession,
-    bool Countdown, string? LanNetworkId = null, TeamStandard? TeamStandard = null) : AgentMessage;
+    bool Countdown, string? LanNetworkId = null, TeamStandard? TeamStandard = null, string? Game = null) : AgentMessage;
 
 /// <summary>Orchestrator → agent: a room request failed (unknown code, not the host…).</summary>
 public sealed record RoomError(string Message) : AgentMessage;
