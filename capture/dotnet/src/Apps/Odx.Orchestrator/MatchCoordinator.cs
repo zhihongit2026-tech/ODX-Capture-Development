@@ -65,6 +65,36 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 else log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
                 if (room is not null) effects.Changed.Add(room);
                 break;
+            case SetTeamStandard standard when room is not null && room.IsHost(link) && IsArma3Room(room):
+                if (room.Current is not null)
+                    effects.Sends.Add((link, new RoomError("Team Standard can only be changed between rounds.")));
+                else if (standard.RecordingFps is not (30 or 60))
+                    effects.Sends.Add((link, new RoomError("Team recording FPS must be 30 or 60.")));
+                else
+                {
+                    room.TeamStandard = new TeamStandard(standard.RecordingFps, link.Preflight,
+                        NtpResponder.NowUnixMs());
+                    foreach (var member in room.Members)
+                    {
+                        member.Ready = false;
+                        member.SevereSinceUtc = null;
+                    }
+                    RevalidateTeamPreflight(room);
+                    effects.Changed.Add(room);
+                    log.LogInformation("room {Room}: host selected Team Standard {Fps} FPS", room.Code, standard.RecordingFps);
+                }
+                break;
+            case TeamPreflight report when room is not null && IsArma3Room(room):
+                link.Preflight = report.Snapshot;
+                if (room.IsHost(link) && room.TeamStandard is { } hostStandard)
+                    room.TeamStandard = hostStandard with { HostSnapshot = report.Snapshot, UpdatedAtUtcMs = NtpResponder.NowUnixMs() };
+                RevalidateTeamPreflight(room);
+                effects.Changed.Add(room);
+                log.LogInformation("room {Room}: {Player} reported Arma 3 preflight", room.Code, link.Id);
+                break;
+            case PerformanceTelemetry telemetry when room is not null && IsArma3Room(room):
+                HandlePerformanceTelemetry(link, room, telemetry, effects);
+                break;
             case CreateRoom:
                 Leave(link, "left_room", effects);
                 var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork };
@@ -77,6 +107,8 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 string code = j.Code.Trim().ToUpperInvariant();
                 if (!_rooms.TryGetValue(code, out var target))
                     effects.Sends.Add((link, new RoomError($"no room with invite code {code}")));
+                else if (target != room && IsArma3Room(target) && target.Members.Count >= 4)
+                    effects.Sends.Add((link, new RoomError("Arma 3 Team Room is limited to exactly four players.")));
                 else if (target != room)
                 {
                     Leave(link, "left_room", effects);
@@ -89,6 +121,12 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 break;
             case CloseRoom when room is not null && room.IsHost(link):
                 Close(room, effects);
+                break;
+            case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && IsArma3Room(room) && room.Members.Count != 4:
+                effects.Sends.Add((link, new RoomError($"Arma 3 Team requires exactly 4 connected members; currently {room.Members.Count}/4.")));
+                break;
+            case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && IsArma3Room(room) && room.TeamStandard is not { IsValid: true, HostSnapshot: not null }:
+                effects.Sends.Add((link, new RoomError("Set the Team Standard to 30 or 60 FPS and complete the host preflight first.")));
                 break;
             case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && Saving(room) is { Count: > 0 } saving:
                 effects.Sends.Add((link, new RoomError($"still saving the last round: {string.Join(", ", saving.Select(a => a.Hello.Name))}")));
@@ -114,6 +152,113 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 SetReady(room, link, r.IsReady, effects);
                 break;
         }
+    }
+
+    private bool IsArma3Room(Room room) =>
+        room.Game.Equals("Arma 3", StringComparison.OrdinalIgnoreCase) ||
+        _profileGame.Equals("Arma 3", StringComparison.OrdinalIgnoreCase);
+
+    private static void RevalidateTeamPreflight(Room room)
+    {
+        if (room.TeamStandard is not { IsValid: true, HostSnapshot: { } expected } standard)
+        {
+            foreach (var member in room.Members)
+            {
+                member.PreflightProblem = "Waiting for host Team Standard and preflight.";
+                if (member.Ready) member.Ready = false;
+            }
+            return;
+        }
+
+        foreach (var member in room.Members)
+        {
+            if (member.Preflight is not { } actual)
+                member.PreflightProblem = "Game configuration has not been checked.";
+            else
+            {
+                var differences = TeamPreflightComparer.Differences(expected, actual, standard.RecordingFps);
+                member.PreflightProblem = differences.Count == 0 ? null : string.Join("; ", differences);
+            }
+            if (member.Ready && member.PreflightProblem is not null) member.Ready = false;
+        }
+    }
+
+    private void HandlePerformanceTelemetry(AgentLink link, Room room, PerformanceTelemetry telemetry, Effects effects)
+    {
+        link.Performance = telemetry;
+        int targetFps = room.TeamStandard?.RecordingFps ?? options.Fps;
+        string? warning = null;
+        bool severe = false;
+        bool immediate = !telemetry.GameRunning || !telemetry.CaptureSourceHealthy;
+
+        if (!telemetry.GameRunning)
+            warning = "Arma 3 process closed";
+        else if (!telemetry.CaptureSourceHealthy)
+            warning = "capture source lost";
+        else
+        {
+            if (telemetry.GameFps is double gameFps)
+            {
+                if (gameFps < targetFps * 0.5)
+                {
+                    severe = true;
+                    warning = $"critical game FPS: {gameFps:0} / {targetFps}";
+                }
+                else if (gameFps < targetFps * 0.8)
+                    warning = $"low game FPS: {gameFps:0} / {targetFps}";
+            }
+            if (telemetry.RecordingFps > 0 && telemetry.RecordingFps < targetFps * 0.5)
+            {
+                severe = true;
+                warning = $"critical recording FPS: {telemetry.RecordingFps:0} / {targetFps}";
+            }
+            else if (telemetry.RecordingFps > 0 && telemetry.RecordingFps < targetFps * 0.9 && warning is null)
+                warning = $"low recording FPS: {telemetry.RecordingFps:0} / {targetFps}";
+            if (telemetry.Frames >= targetFps * 5 && telemetry.Starved > telemetry.Frames * 0.1)
+            {
+                severe = true;
+                warning = $"encoder starved: {telemetry.Starved} / {telemetry.Frames} frames";
+            }
+            if (!telemetry.EncoderHealthy)
+            {
+                severe = true;
+                warning = "encoder is unhealthy";
+            }
+            if (!telemetry.AudioHealthy && warning is null)
+                warning = "audio capture is unhealthy";
+            if (telemetry.CpuUsagePercent is > 95 && warning is null)
+                warning = $"high CPU usage: {telemetry.CpuUsagePercent:0}%";
+            if (telemetry.GpuUsagePercent is > 95 && warning is null)
+                warning = $"high GPU usage: {telemetry.GpuUsagePercent:0}%";
+        }
+
+        link.PerformanceProblem = warning;
+        if (immediate)
+        {
+            link.SevereSinceUtc = null;
+            if (room.Current is { Ended: false } current)
+            {
+                string reason = !telemetry.GameRunning
+                    ? $"team_stop_game_closed:{link.Id}"
+                    : $"team_stop_capture_source_lost:{link.Id}";
+                log.LogError("room {Room}: immediate team stop from {Player}: {Reason}", room.Code, link.Id, reason);
+                EndRound(room, NtpResponder.NowUnixMs(), "team_stop", reason, effects);
+            }
+        }
+        else if (severe)
+        {
+            link.SevereSinceUtc ??= DateTime.UtcNow;
+            if (room.Current is { Ended: false } current && DateTime.UtcNow - link.SevereSinceUtc.Value >= TimeSpan.FromSeconds(5))
+            {
+                string reason = $"team_stop_severe_5s:{link.Id}:{warning}";
+                log.LogError("room {Room}: severe performance persisted 5 seconds for {Player}: {Problem}", room.Code, link.Id, warning);
+                EndRound(room, NtpResponder.NowUnixMs(), "team_stop", reason, effects);
+                link.SevereSinceUtc = null;
+            }
+        }
+        else link.SevereSinceUtc = null;
+
+        effects.Changed.Add(room);
     }
 
     /// <summary>Applies one game server event to a room and returns it stamped; null when there is no such room.</summary>
@@ -183,6 +328,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
         ["server"] = room.Server,
         ["match_id"] = room.MatchId,
         ["game"] = room.Game,
+        ["team_standard"] = room.TeamStandard is null ? null : System.Text.Json.JsonSerializer.SerializeToNode(room.TeamStandard, AgentMessage.Json),
         ["current_session"] = room.Current?.Record.SessionId,
         ["countdown"] = room.Current?.Counting ?? false,
         ["pending_sessions"] = new JsonArray(_rounds.Values.Where(r => r.Room == room)
@@ -193,8 +339,11 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             ["name"] = a.Hello.Name,
             ["version"] = a.Hello.ToolVersion,
             ["state"] = a.State,
-            ["problem"] = a.Problem,
+            ["problem"] = a.Problem ?? a.PerformanceProblem,
             ["ready"] = a.Ready,
+            ["preflight"] = a.Preflight is null ? null : System.Text.Json.JsonSerializer.SerializeToNode(a.Preflight, AgentMessage.Json),
+            ["preflight_problem"] = a.PreflightProblem,
+            ["performance"] = a.Performance is null ? null : System.Text.Json.JsonSerializer.SerializeToNode(a.Performance, AgentMessage.Json),
         }).ToArray()),
         ["sessions"] = new JsonArray(room.Recorded.Select(r => (JsonNode)new JsonObject
         {
@@ -211,8 +360,9 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             updates = effects.Changed.Where(r => _rooms.ContainsKey(r.Code)).SelectMany(r =>
             {
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
-                    r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State, a.Problem)).ToList(),
-                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId);
+                    r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State,
+                        a.Problem ?? a.PerformanceProblem, a.Preflight, a.PreflightProblem, a.Performance)).ToList(),
+                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId, r.TeamStandard);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();
         }
