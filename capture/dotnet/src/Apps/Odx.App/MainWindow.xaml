@@ -474,6 +474,13 @@
                             <TextBlock Foreground="#AFC5E6" FontSize="10">
                               <Run Text="Game FPS: "/><Run Text="{Binding Performance.GameFps, StringFormat={}{0:0.0}}"/>
                               <Run Text=" · Record FPS: "/><Run Text="{Binding Performance.RecordingFps, StringFormat={}{0:0.0}}"/>
+                              <Run Text=" · CPU: "/><Run Text="{Binding Performance.CpuUsagePercent, StringFormat={}{0:0}%}"/>
+                              <Run Text=" · GPU: "/><Run Text="{Binding Performance.GpuUsagePercent, StringFormat={}{0:0}%}"/>
+                            </TextBlock>
+                            <TextBlock Foreground="#8FAED5" FontSize="9">
+                              <Run Text="Dropped: "/><Run Text="{Binding Performance.Dropped}"/>
+                              <Run Text=" · Duplicate: "/><Run Text="{Binding Performance.Duplicates}"/>
+                              <Run Text=" · Starved: "/><Run Text="{Binding Performance.Starved}"/>
                             </TextBlock>
                           </StackPanel>
                         </Border>
