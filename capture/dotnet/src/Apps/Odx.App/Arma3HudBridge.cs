@@ -21,6 +21,7 @@ public sealed class Arma3HudBridge : IAsyncDisposable
     private readonly Task _server;
     private TaskCompletionSource<Arma3PreflightWire>? _preflightWaiter;
     private TaskCompletionSource<bool>? _hudWaiter;
+    private string? _expectedHudAck;
     private DateTime _lastSeenUtc = DateTime.MinValue;
     private Arma3PreflightWire? _lastPreflight;
     private Arma3TelemetryWire? _lastTelemetry;
@@ -86,9 +87,9 @@ public sealed class Arma3HudBridge : IAsyncDisposable
     {
         if (!IsConnected) return false;
         if (LastPreflight?.MissionBlocksHud == true) return false;
-        if (LastTelemetry?.HudHidden == true) return true;
+        if (LastPreflight?.HudHidden == true && _lastAck == "HIDDEN") return true;
         var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (_gate) _hudWaiter = waiter;
+        lock (_gate) { _hudWaiter = waiter; _expectedHudAck = "HIDDEN"; }
         _commands.Enqueue("HIDE");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, _stop.Token);
         linked.CancelAfter(timeout ?? TimeSpan.FromSeconds(6));
@@ -100,9 +101,8 @@ public sealed class Arma3HudBridge : IAsyncDisposable
     public async Task<bool> RestoreAsync(TimeSpan? timeout = null, CancellationToken stop = default)
     {
         if (!IsConnected) return false;
-        if (LastTelemetry?.HudHidden != true) return true;
         var waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (_gate) _hudWaiter = waiter;
+        lock (_gate) { _hudWaiter = waiter; _expectedHudAck = "RESTORED"; }
         _commands.Enqueue("RESTORE");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, _stop.Token);
         linked.CancelAfter(timeout ?? TimeSpan.FromSeconds(6));
@@ -124,7 +124,7 @@ public sealed class Arma3HudBridge : IAsyncDisposable
             wire.GameTitle, wire.GameVersion, wire.ModFingerprint, wire.SettingsFingerprint,
             wire.ScreenWidth, wire.ScreenHeight, wire.AspectRatio, recordingFps,
             wire.HudBridgeVersion, IsConnected && wire.HudBridgeReady,
-            LastTelemetry?.HudHidden ?? wire.HudHidden,
+            wire.HudHidden,
             wire.MissionBlocksHud, settings);
     }
 
@@ -191,8 +191,18 @@ public sealed class Arma3HudBridge : IAsyncDisposable
                     return _commands.TryDequeue(out string? command) ? command : "NONE";
                 }
                 case "ack":
-                    lock (_gate) _lastAck = payload;
+                {
+                    TaskCompletionSource<bool>? waiter;
+                    bool matches;
+                    lock (_gate)
+                    {
+                        _lastAck = payload.Trim().ToUpperInvariant();
+                        waiter = _hudWaiter;
+                        matches = string.Equals(_lastAck, _expectedHudAck, StringComparison.OrdinalIgnoreCase);
+                    }
+                    if (matches) waiter?.TrySetResult(true);
                     return "OK";
+                }
                 default:
                     return "UNKNOWN_FUNCTION";
             }
@@ -229,7 +239,4 @@ public sealed record Arma3PreflightWire(
 public sealed record Arma3TelemetryWire(
     double GameFps,
     double GameFpsMin,
-    bool HudHidden,
-    bool GameRunning,
-    bool MissionBlocksHud,
     double SampledAtUtcMs);
