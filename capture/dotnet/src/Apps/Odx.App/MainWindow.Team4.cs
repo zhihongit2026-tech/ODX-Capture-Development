@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Odx.Capture;
 using Odx.Protocol;
 
@@ -73,6 +74,37 @@ public partial class MainWindow
             TeamPreflightStatus.Text = $"4/4 READY · chuẩn ghi hình {room.TeamStandard.RecordingFps} FPS · cấu hình đã đối chiếu trước round.";
         else
             TeamPreflightStatus.Text = $"Chuẩn đội {room.TeamStandard.RecordingFps} FPS · {ready}/4 READY · từng thành viên bấm READY sau khi kiểm tra máy.";
+    }
+
+    private void InstallArma3Hud_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? root = Arma3HudInstaller.FindGameRoot();
+            if (root is null)
+            {
+                var dialog = new OpenFolderDialog
+                {
+                    Title = "Chọn thư mục cài đặt Arma 3 (chứa arma3_x64.exe)",
+                    Multiselect = false
+                };
+                if (dialog.ShowDialog(this) != true) return;
+                root = dialog.FolderName;
+            }
+
+            string source = Path.Combine(AppContext.BaseDirectory, "mods", "@ODX_HUD");
+            var result = Arma3HudInstaller.Install(source, root);
+            TeamPreflightStatus.Text = "Đã cài @ODX_HUD vào " + result.ModPath +
+                ". Mở Arma 3 Launcher → Mods → Local mod, bật @ODX_HUD rồi khởi động lại Arma 3.";
+            MessageBox.Show(this,
+                "Đã cài @ODX_HUD thành công.\n\nTiếp theo:\n1. Mở Arma 3 Launcher.\n2. Chọn Mods → Local mod.\n3. Bật @ODX_HUD.\n4. Khởi động lại Arma 3.\n\nODX không sửa file game gốc.",
+                "ODX HUD Bridge", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception e)
+        {
+            TeamPreflightStatus.Text = "Cài @ODX_HUD thất bại: " + e.Message;
+            MessageBox.Show(this, e.Message, "Không thể cài ODX HUD", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private async void ApplyTeamStandard_Click(object sender, RoutedEventArgs e)
