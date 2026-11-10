@@ -187,6 +187,7 @@ public sealed record PerformanceTelemetry(
     double? GameFpsMin,
     double RecordingFps,
     long Frames,
+    long Dropped,
     long Duplicates,
     long Starved,
     double? CpuUsagePercent,
