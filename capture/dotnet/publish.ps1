@@ -63,12 +63,18 @@ Copy-Item (Join-Path $launcherOut 'odx-launcher.exe') (Join-Path $out 'Odx Captu
 # Keep the 0.3.2 room server/key out of GitHub artifacts. The owner restores it locally from the original ZIP.
 Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.ps1') (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')
 Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.cmd') (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')
-# Include the Arma 3 local mod; no PBO packing or Arma tools are required for a local-mod folder.
-$hudSource = Join-Path $root '..\arma3\@ODX_HUD'
-if (-not (Test-Path (Join-Path $hudSource 'addons\odx_hud\config.cpp'))) {
+# Arma 3 Launcher loads PBOs from @ODX_HUD\addons; pack the client addon with the repository's PBO writer.
+$hudSource = Join-Path $root '..\arma3\@ODX_HUD\addons\odx_hud'
+$hudMod = Join-Path $out '@ODX_HUD'
+$hudAddons = Join-Path $hudMod 'addons'
+if (-not (Test-Path (Join-Path $hudSource 'config.cpp'))) {
     throw "ODX HUD addon source is missing: $hudSource"
 }
-Copy-Item -Recurse -Force $hudSource (Join-Path $out '@ODX_HUD')
+New-Item -ItemType Directory -Force $hudAddons | Out-Null
+$packPbo = Join-Path $root '..\deploy\aws\arma3\pack_pbo.py'
+python $packPbo $hudSource (Join-Path $hudAddons 'odx_hud.pbo')
+if ($LASTEXITCODE -ne 0) { throw 'ODX HUD PBO packaging failed' }
+Copy-Item (Join-Path $root '..\arma3\@ODX_HUD\README.txt') (Join-Path $hudMod 'README.txt')
 
 # Package the Arma 3 client addon as a local mod. The PBO prefix must remain "odx_hud"
 # because CfgFunctions resolves \\odx_hud\\functions inside the PBO.
