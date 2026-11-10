@@ -63,6 +63,12 @@ Copy-Item (Join-Path $launcherOut 'odx-launcher.exe') (Join-Path $out 'Odx Captu
 # Keep the 0.3.2 room server/key out of GitHub artifacts. The owner restores it locally from the original ZIP.
 Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.ps1') (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')
 Copy-Item (Join-Path $root 'RESTORE_ROOM_FROM_032.cmd') (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')
+# Include the Arma 3 local mod; no PBO packing or Arma tools are required for a local-mod folder.
+$hudSource = Join-Path $root '..\arma3\@ODX_HUD'
+if (-not (Test-Path (Join-Path $hudSource 'addons\odx_hud\config.cpp'))) {
+    throw "ODX HUD addon source is missing: $hudSource"
+}
+Copy-Item -Recurse -Force $hudSource (Join-Path $out '@ODX_HUD')
 
 # Package the Arma 3 client addon as a local mod. The PBO prefix must remain "odx_hud"
 # because CfgFunctions resolves \\odx_hud\\functions inside the PBO.
