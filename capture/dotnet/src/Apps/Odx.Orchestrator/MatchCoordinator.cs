@@ -60,7 +60,9 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
         {
             case AgentState s:
                 link.State = s.State;
-                link.Problem = s.State is "recording" or "saving" or "team-ready" ? s.Problem : null;
+                link.Problem = s.State is "recording" or "saving" or "team-ready" ||
+                               s.Problem?.StartsWith("ODXTEAM:", StringComparison.Ordinal) == true
+                    ? s.Problem : null;
                 if (s.Problem?.StartsWith("ODXTEAM:", StringComparison.Ordinal) == true)
                     log.LogDebug("agent {Player}: {State} {Detail} (team telemetry updated)", link.Id, s.State, s.Detail);
                 else if (s.Problem is not null)
