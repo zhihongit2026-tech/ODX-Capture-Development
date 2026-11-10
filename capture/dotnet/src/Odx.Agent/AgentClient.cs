@@ -139,8 +139,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     public Task ReportTeamStatusAsync(Arma3TeamStatus status, CancellationToken stop = default)
     {
-        if (_run is null) return Task.CompletedTask;
-        string state = _run.Phase == CapturePhase.Recording ? "recording" : "saving";
+        string state = _run is null ? "idle" : _run.Phase == CapturePhase.Recording ? "recording" : "saving";
         return SendAsync(new AgentState(state, "ODX team telemetry", status.ToRoomProblem()), stop);
     }
 
