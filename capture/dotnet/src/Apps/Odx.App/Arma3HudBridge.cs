@@ -43,7 +43,7 @@ public sealed record Arma3Telemetry(
     public bool FullHudHidden => HudActive && !HudVisible && !MissionOverride;
 
     public string DifficultySignature =>
-        string.Join(",", GroupIndicators, FriendlyTags, EnemyTags, DetectedMines, Commands, Waypoints, TacticalPing);
+        $"{GroupIndicators},{FriendlyTags},{EnemyTags},{DetectedMines},{Commands},{Waypoints},{TacticalPing}";
 }
 
 public sealed record Arma3PreflightResult(bool Success, Arma3Telemetry? Telemetry, IReadOnlyList<string> Issues)
