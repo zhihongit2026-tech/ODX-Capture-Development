@@ -55,11 +55,14 @@ public static class GameEvents
 [JsonDerivedType(typeof(LanMember), "lan_member")]
 [JsonDerivedType(typeof(RoundFiles), "round_record")]
 [JsonDerivedType(typeof(GameEvent), "game_event")]
+[JsonDerivedType(typeof(SetTeamStandard), "set_team_standard")]
+[JsonDerivedType(typeof(TeamPreflight), "team_preflight")]
+[JsonDerivedType(typeof(PerformanceTelemetry), "performance_telemetry")]
 [JsonDerivedType(typeof(Incompatible), "incompatible")]
 public abstract record AgentMessage
 {
     /// <summary>Raised whenever a message changes in a way the other side cannot read; sent in <see cref="Hello"/>.</summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -172,6 +175,80 @@ public sealed record Done(string SessionId, bool Ok, string? Error = null, Captu
 /// <summary>Agent → orchestrator: the player is (not) ready; when every player of the room is, a round starts after a countdown.</summary>
 public sealed record Ready(bool IsReady) : AgentMessage;
 
+/// <summary>Host → orchestrator: select the team's recording/output FPS for the next round.</summary>
+public sealed record SetTeamStandard(int RecordingFps) : AgentMessage;
+
+/// <summary>Agent → orchestrator: one pre-round snapshot. Configuration is compared once before READY, not polled during recording.</summary>
+public sealed record TeamPreflight(TeamPreflightSnapshot Snapshot) : AgentMessage;
+
+/// <summary>Agent → orchestrator: low-overhead live performance sample. This data is never composited into the recorded video.</summary>
+public sealed record PerformanceTelemetry(
+    double? GameFps,
+    double? GameFpsMin,
+    double RecordingFps,
+    long Frames,
+    long Duplicates,
+    long Starved,
+    double? CpuUsagePercent,
+    double? GpuUsagePercent,
+    bool EncoderHealthy,
+    bool CaptureSourceHealthy,
+    bool AudioHealthy,
+    bool GameRunning,
+    bool HudHidden,
+    double SampledAtUtcMs) : AgentMessage;
+
+/// <summary>Arma 3 client configuration snapshot captured before READY.</summary>
+public sealed record TeamPreflightSnapshot(
+    string GameTitle,
+    string GameVersion,
+    string ModFingerprint,
+    string SettingsFingerprint,
+    int ScreenWidth,
+    int ScreenHeight,
+    double AspectRatio,
+    int RecordingFps,
+    string HudBridgeVersion,
+    bool HudBridgeReady,
+    bool HudHidden,
+    bool MissionBlocksHud,
+    Dictionary<string, string> Settings);
+
+/// <summary>The host's approved standard for the next round.</summary>
+public sealed record TeamStandard(int RecordingFps, TeamPreflightSnapshot? HostSnapshot = null, double UpdatedAtUtcMs = 0)
+{
+    public bool IsValid => RecordingFps is 30 or 60;
+}
+
+/// <summary>Compares only preflight configuration. Live performance telemetry is deliberately excluded.</summary>
+public static class TeamPreflightComparer
+{
+    public static List<string> Differences(TeamPreflightSnapshot expected, TeamPreflightSnapshot actual, int teamRecordingFps)
+    {
+        var differences = new List<string>();
+        void Compare(string name, string left, string right)
+        {
+            if (!string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+                differences.Add($"{name}: expected {left}, actual {right}");
+        }
+
+        Compare("Game", expected.GameTitle, actual.GameTitle);
+        Compare("Game version", expected.GameVersion, actual.GameVersion);
+        Compare("Mod set", expected.ModFingerprint, actual.ModFingerprint);
+        Compare("Game settings", expected.SettingsFingerprint, actual.SettingsFingerprint);
+        Compare("Resolution", $"{expected.ScreenWidth}x{expected.ScreenHeight}", $"{actual.ScreenWidth}x{actual.ScreenHeight}");
+        if (Math.Abs(expected.AspectRatio - actual.AspectRatio) > 0.01)
+            differences.Add($"Aspect ratio: expected {expected.AspectRatio:0.###}, actual {actual.AspectRatio:0.###}");
+        if (actual.RecordingFps != teamRecordingFps)
+            differences.Add($"Recording FPS: expected {teamRecordingFps}, actual {actual.RecordingFps}");
+        Compare("HUD Bridge version", expected.HudBridgeVersion, actual.HudBridgeVersion);
+        if (!actual.HudBridgeReady) differences.Add("ODX HUD Bridge is not ready");
+        if (!actual.HudHidden) differences.Add("HUD is not confirmed hidden");
+        if (actual.MissionBlocksHud) differences.Add("Mission Description.ext overrides showHUD");
+        return differences;
+    }
+}
+
 /// <summary>
 /// Agent → orchestrator: open a room with this player as its host; the answer is a <see cref="RoomUpdate"/> with the invite
 /// code. <paramref name="Lan"/>: give the room a virtual LAN (a ZeroTier network) for games that only play over LAN.
@@ -196,12 +273,13 @@ public sealed record ToggleRound(int CountdownMs, string? SessionId = null) : Ag
 }
 
 /// <param name="Problem">What is going wrong with this member's recording, while it records or saves (<see cref="AgentState.Problem"/>).</param>
-public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State, string? Problem = null);
+public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State, string? Problem = null,
+    TeamPreflightSnapshot? Preflight = null, string? PreflightProblem = null, PerformanceTelemetry? Performance = null);
 
 /// <summary>Orchestrator → every member whenever the room changes (members, ready, states, round).</summary>
 /// <param name="LanNetworkId">The room's ZeroTier network to join; null when the room has no LAN.</param>
 public sealed record RoomUpdate(string Code, string? HostPlayerId, List<RoomMember> Members, string? CurrentSession,
-    bool Countdown, string? LanNetworkId = null) : AgentMessage;
+    bool Countdown, string? LanNetworkId = null, TeamStandard? TeamStandard = null) : AgentMessage;
 
 /// <summary>Orchestrator → agent: a room request failed (unknown code, not the host…).</summary>
 public sealed record RoomError(string Message) : AgentMessage;
