@@ -333,7 +333,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     public Task ReportPerformanceAsync(PerformanceTelemetry telemetry, CancellationToken stop) =>
         SendAsync(new PerformanceTelemetry(telemetry.GameFps, telemetry.GameFpsMin, telemetry.RecordingFps,
-            telemetry.Frames, telemetry.Duplicates, telemetry.Starved, telemetry.CpuUsagePercent, telemetry.GpuUsagePercent,
+            telemetry.Frames, telemetry.Dropped, telemetry.Duplicates, telemetry.Starved, telemetry.CpuUsagePercent, telemetry.GpuUsagePercent,
             telemetry.EncoderHealthy, telemetry.CaptureSourceHealthy, telemetry.AudioHealthy, telemetry.GameRunning,
             telemetry.HudHidden, telemetry.SampledAtUtcMs), stop);
 
