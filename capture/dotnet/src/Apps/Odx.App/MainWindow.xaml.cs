@@ -937,6 +937,26 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private static Arma3TeamStatus BuildArma3PreflightStatus(Arma3Telemetry telemetry) =>
+        new(telemetry.AddonVersion, telemetry.GameFps, telemetry.GameFpsMin,
+            telemetry.Width, telemetry.Height, telemetry.AspectRatio,
+            HudHidden: false, telemetry.MissionOverride, telemetry.DifficultySignature, telemetry.ModsHash,
+            CaptureFps: 0, DroppedFrames: 0, StarvedFrames: 0, Health: "READY", Issues: [], DateTime.UtcNow);
+
+    private static List<string> CompareArma3Configuration(Arma3TeamStatus reference, Arma3TeamStatus candidate)
+    {
+        var differences = new List<string>();
+        if (!string.Equals(reference.AddonVersion, candidate.AddonVersion, StringComparison.Ordinal))
+            differences.Add("ODX_HUD addon version");
+        if (!string.Equals(reference.ModsHash, candidate.ModsHash, StringComparison.Ordinal))
+            differences.Add("active Mods");
+        if (Math.Abs(reference.AspectRatio - candidate.AspectRatio) > 0.015)
+            differences.Add("screen aspect ratio");
+        if (!string.Equals(reference.DifficultySignature, candidate.DifficultySignature, StringComparison.Ordinal))
+            differences.Add("Difficulty Hide settings");
+        return differences;
+    }
+
     private static string FormatTeamMember(RoomMember member, Arma3TeamStatus? status, Arma3TeamStatus? hostTelemetry, bool isHost)
     {
         string label = member.Name + (member.Ready ? " ✓" : "");
@@ -967,14 +987,16 @@ public partial class MainWindow : Window
                 issues.Add("Capture FPS mismatch");
         }
 
-        if (!status.HudHidden) issues.Add("HUD visible");
+        if (status.Health == "OK" && !status.HudHidden) issues.Add("HUD visible");
         if (status.MissionOverride) issues.Add("mission overrides showHUD");
         string ratio = status.AspectRatio > 0 ? $"{status.AspectRatio:0.00}:1" : "ratio unknown";
-        string summary = $"{status.GameFps:0} game FPS · {status.CaptureFps} capture FPS · {ratio} · HUD {(status.HudHidden ? "OFF" : "ON")}";
-        if (issues.Count > 0 || status.Health != "OK")
+        string captureFps = status.CaptureFps > 0 ? $"{status.CaptureFps} capture FPS" : "capture FPS set by Room server";
+        string hud = status.Health == "READY" ? "HUD will hide at countdown" : status.HudHidden ? "HUD OFF" : "HUD ON";
+        string summary = $"{status.GameFps:0} game FPS · {captureFps} · {ratio} · {hud}";
+        if (issues.Count > 0 || status.Health is "WARNING" or "CRITICAL")
             label += " · " + summary + " ⚠ " + string.Join(", ", issues.Distinct());
         else
-            label += " · " + summary + " · OK";
+            label += " · " + summary + " · " + status.Health;
         return label;
     }
 
@@ -1093,7 +1115,16 @@ public partial class MainWindow : Window
     {
         if (_room is not { } room) return;
         var agent = room.Agent;
-        if (!agent.IsReady && string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase))
+
+        // Unready is always allowed, even if the game/addon is no longer available.
+        if (agent.IsReady)
+        {
+            await room.ToggleReadyAsync();
+            if (_run is null) ShowAgentStatus();
+            return;
+        }
+
+        if (string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase))
         {
             var probe = await agent.CheckCaptureAsync();
             if (probe is null || !probe.Ok || !probe.Source.StartsWith("window:arma3_x64", StringComparison.OrdinalIgnoreCase))
@@ -1104,16 +1135,19 @@ public partial class MainWindow : Window
                 ShowAgentStatus();
                 return;
             }
+
             var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio);
-            if (!preflight.Success)
+            if (!preflight.Success || preflight.Telemetry is null)
             {
-                await agent.ReportStateAsync("mismatch|" + string.Join(",", preflight.Issues), preflight.Summary);
+                await agent.ReportStateAsync("mismatch|hud-preflight", preflight.Summary);
                 SetStatus(_ => "Team preflight blocked: " + preflight.Summary);
                 ShowAgentStatus();
                 return;
             }
-            await agent.ReportStateAsync("idle", "Arma 3 local preflight PASS");
+
+            await agent.ReportTeamReadyAsync(BuildArma3PreflightStatus(preflight.Telemetry));
         }
+
         await room.ToggleReadyAsync();
         if (_run is null) ShowAgentStatus();
     }
@@ -1146,7 +1180,37 @@ public partial class MainWindow : Window
                 ShowAgentStatus();
                 return;
             }
-            await agent.ReportStateAsync("idle", "Arma 3 host preflight PASS");
+            if (preflight.Telemetry is null)
+            {
+                SetStatus(_ => "Team start blocked: Arma 3 telemetry is missing.");
+                return;
+            }
+
+            var hostStatus = BuildArma3PreflightStatus(preflight.Telemetry);
+            var team = room.Agent.Room.Members.ToList();
+            var missing = team.Where(m => m.PlayerId != room.Agent.Room.HostPlayerId &&
+                !Arma3TeamStatus.TryParseRoomProblem(m.Problem, out _)).Select(m => m.Name).ToList();
+            if (missing.Count > 0)
+            {
+                SetStatus(_ => "Team start blocked: waiting for matching preflight from " + string.Join(", ", missing));
+                return;
+            }
+
+            var mismatch = new List<string>();
+            foreach (var member in team.Where(m => m.PlayerId != room.Agent.Room.HostPlayerId))
+            {
+                if (!Arma3TeamStatus.TryParseRoomProblem(member.Problem, out var status) || status is null) continue;
+                var differences = CompareArma3Configuration(hostStatus, status);
+                if (differences.Count > 0)
+                    mismatch.Add(member.Name + ": " + string.Join(", ", differences));
+            }
+            if (mismatch.Count > 0)
+            {
+                SetStatus(_ => "Team start blocked: configuration mismatch — " + string.Join(" | ", mismatch));
+                return;
+            }
+
+            await agent.ReportTeamReadyAsync(hostStatus);
         }
         string? task = null;
         if (room.Agent.Room is { CurrentSession: null })
