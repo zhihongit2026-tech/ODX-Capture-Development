@@ -61,8 +61,12 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case AgentState s:
                 link.State = s.State;
                 link.Problem = s.State is "recording" or "saving" or "team-ready" ? s.Problem : null;
-                if (s.Problem is not null) log.LogWarning("agent {Player}: {State} {Detail}: {Problem}", link.Id, s.State, s.Detail, s.Problem);
-                else log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
+                if (s.Problem?.StartsWith("ODXTEAM:", StringComparison.Ordinal) == true)
+                    log.LogDebug("agent {Player}: {State} {Detail} (team telemetry updated)", link.Id, s.State, s.Detail);
+                else if (s.Problem is not null)
+                    log.LogWarning("agent {Player}: {State} {Detail}: {Problem}", link.Id, s.State, s.Detail, s.Problem);
+                else
+                    log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
                 if (room is not null) effects.Changed.Add(room);
                 break;
             case CreateRoom:
