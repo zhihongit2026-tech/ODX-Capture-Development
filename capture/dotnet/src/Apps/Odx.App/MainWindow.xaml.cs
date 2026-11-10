@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _teamMonitorTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private bool _hudHiddenForCapture, _teamMonitorBusy;
     private DateTime? _gameFpsLowSince, _gameFpsCriticalSince;
+    private DateTime? _captureFpsLowSince, _captureFpsCriticalSince;
     private const double Arma3ExpectedAspectRatio = 16.0 / 9.0;
 
     /// <summary>
@@ -1053,6 +1054,28 @@ public partial class MainWindow : Window
             }
 
             var recorder = _run.LastStatus;
+            if (recorder is { Fps: > 0 } && recorder.Fps < targetFps * 0.60)
+            {
+                _captureFpsCriticalSince ??= now;
+                if (now - _captureFpsCriticalSince >= TimeSpan.FromSeconds(3))
+                {
+                    issues.Add($"capture FPS critical: {recorder.Fps:0.0}/{targetFps}");
+                    health = "CRITICAL";
+                }
+            }
+            else _captureFpsCriticalSince = null;
+
+            if (recorder is { Fps: > 0 } && recorder.Fps < targetFps * 0.80)
+            {
+                _captureFpsLowSince ??= now;
+                if (now - _captureFpsLowSince >= TimeSpan.FromSeconds(5))
+                {
+                    issues.Add($"capture FPS low: {recorder.Fps:0.0}/{targetFps}");
+                    if (health != "CRITICAL") health = "WARNING";
+                }
+            }
+            else _captureFpsLowSince = null;
+
             if (recorder is { Starved: > 0 })
             {
                 issues.Add($"encoder starved {recorder.Starved} frames");
