@@ -219,6 +219,13 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 severe = true;
                 warning = $"encoder starved: {telemetry.Starved} / {telemetry.Frames} frames";
             }
+            else if (telemetry.Frames >= targetFps * 5 && telemetry.Dropped > telemetry.Frames * 0.1)
+            {
+                severe = true;
+                warning = $"critical dropped frames: {telemetry.Dropped} / {telemetry.Frames}";
+            }
+            else if (telemetry.Frames >= targetFps * 5 && telemetry.Dropped > telemetry.Frames * 0.02 && warning is null)
+                warning = $"dropped frames: {telemetry.Dropped} / {telemetry.Frames}";
             if (!telemetry.EncoderHealthy)
             {
                 severe = true;
