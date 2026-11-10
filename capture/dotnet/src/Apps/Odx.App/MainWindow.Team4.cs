@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -100,10 +101,10 @@ public partial class MainWindow
                 "Đã cài @ODX_HUD thành công.\n\nTiếp theo:\n1. Mở Arma 3 Launcher.\n2. Chọn Mods → Local mod.\n3. Bật @ODX_HUD.\n4. Khởi động lại Arma 3.\n\nODX không sửa file game gốc.",
                 "ODX HUD Bridge", MessageBoxButton.OK, MessageBoxImage.Information);
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            TeamPreflightStatus.Text = "Cài @ODX_HUD thất bại: " + e.Message;
-            MessageBox.Show(this, e.Message, "Không thể cài ODX HUD", MessageBoxButton.OK, MessageBoxImage.Warning);
+            TeamPreflightStatus.Text = "Cài @ODX_HUD thất bại: " + ex.Message;
+            MessageBox.Show(this, ex.Message, "Không thể cài ODX HUD", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -174,7 +175,7 @@ public partial class MainWindow
 
     private async Task ToggleReadyTeamAwareAsync()
     {
-        if (_room is null || _agent?.Room is not { } room) return;
+        if (_room is null || _agent is not { Room: { } room } agent) return;
 
         if (!IsArma3Room(room))
         {
@@ -183,7 +184,7 @@ public partial class MainWindow
             return;
         }
 
-        if (_agent.IsReady)
+        if (agent.IsReady)
         {
             await _room.ToggleReadyAsync();
             await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(4));
