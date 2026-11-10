@@ -9,7 +9,6 @@ namespace
 {
     constexpr char PipeName[] = R"(\\.\pipe\ODX_HUD_BRIDGE)";
     constexpr DWORD ConnectTimeoutMs = 75;
-    constexpr DWORD IoTimeoutMs = 100;
     constexpr size_t MaxResponse = 4096;
 
     void CopyOutput(char* output, unsigned int outputSize, const std::string& value)
@@ -54,6 +53,7 @@ namespace
             if (newline != std::string::npos)
             {
                 response.resize(newline);
+                if (!response.empty() && response.back() == '\\r') response.pop_back();
                 break;
             }
         }
