@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/arma3-team-sync-hud-monitor
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
