@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: capture/dotnet/global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
       - name: Install video test tools
         shell: pwsh
         run: choco install ffmpeg -y --no-progress
@@ -47,7 +50,7 @@ jobs:
         run: |
           ./publish.ps1 -Version 0.3.4
           if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
-          if (-not (Test-Path 'dist/odx-capture-0.3.4-win-x64/@ODX_HUD/addons/odx_hud/config.cpp')) {
+          if (-not (Test-Path 'dist/odx-capture-0.3.4-win-x64/@ODX_HUD/addons/odx_hud.pbo')) {
             throw 'ODX HUD local mod was not included'
           }
       - uses: actions/upload-artifact@v4
