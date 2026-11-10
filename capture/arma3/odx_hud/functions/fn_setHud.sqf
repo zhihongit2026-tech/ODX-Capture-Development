@@ -81,6 +81,7 @@ if (ODX_HUD_active) then
     if (count _original > 11) then { showChat (_original # 11); };
 
     ODX_HUD_active = false;
+    ODX_HUD_original = [];
     diag_log "ODX_HUD|ACK|RESTORED";
 };
 
