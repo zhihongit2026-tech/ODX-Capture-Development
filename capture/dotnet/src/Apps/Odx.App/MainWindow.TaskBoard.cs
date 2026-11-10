@@ -366,6 +366,8 @@ public partial class MainWindow
             TaskLocalStatus.Text = "Task này đã đánh dấu hoàn thành. Chuyển sang bộ lọc Đã quay và bỏ tích nếu muốn quay lại.";
             return;
         }
+        if ((TaskFilterBox.SelectedItem as ComboBoxItem)?.Tag as string == "done")
+            TaskFilterBox.SelectedIndex = 0;
         _taskManualEditing = true;
         try { ChooseTask(entry); }
         finally { _taskManualEditing = false; }
@@ -436,7 +438,7 @@ public partial class MainWindow
             ? " · Đã đánh dấu hoàn thành; Task được ẩn khỏi danh sách Chưa quay."
             : " · Đã bỏ dấu tích; Task trở lại danh sách Chưa quay. Video cũ không bị xóa.");
         RefreshTaskList();
-        TaskSyncStatus.Text = $"{_taskScope.Split('|').ElementAtOrDefault(1)} · {_taskEntries.Count} Task đã đồng bộ · {_taskEntries.Count(row => !row.IsRecorded)} chưa quay · {_taskEntries.Count(row => row.IsRecorded)} đã quay";
+        TaskSyncStatus.Text = $"{_taskEntries.Count} Task đã đồng bộ · {_taskEntries.Count(row => !row.IsRecorded)} chưa quay · {_taskEntries.Count(row => row.IsRecorded)} đã quay";
     }
 
     private void UpdateTaskRecordingDisplay()
