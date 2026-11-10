@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
     private const int HotkeyId = 1;
     private const uint MOD_NOREPEAT = 0x4000;
     private const int CountdownSeconds = 3;
+    private static readonly TimeSpan AutoStopAfter = TimeSpan.FromSeconds(245);
 
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
@@ -55,6 +57,9 @@ public partial class MainWindow : Window
     private CountdownOverlay? _overlay;
     private int _countdownLeft;
     private DateTime _runStarted;
+    private CancellationTokenSource? _autoStop;
+    private CancellationTokenSource? _roomAutoStop;
+    private string? _roomAutoStopSession;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -65,6 +70,12 @@ public partial class MainWindow : Window
     /// <summary>The last round's outcome for the status line; null before any.</summary>
     private Func<Strings, string>? _roundResult;
     private readonly ElevatedPackets _packets = new();
+    private readonly Arma3HudBridge _arma3Hud = new();
+    private readonly DispatcherTimer _teamMonitorTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private bool _hudHiddenForCapture, _teamMonitorBusy;
+    private DateTime? _gameFpsLowSince, _gameFpsCriticalSince;
+    private DateTime? _captureFpsLowSince, _captureFpsCriticalSince;
+    private const double Arma3ExpectedAspectRatio = 0; // Compare each member against the host; do not force 16:9.
 
     /// <summary>
     /// Idle → Countdown → Starting (odx record warming up) → Recording → Stopping (incl. build + validate) → Idle.
@@ -103,6 +114,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => ShowRecordingStatus();
+        _teamMonitorTimer.Tick += async (_, _) => await UpdateTeamTelemetryAsync();
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -205,6 +217,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        CancelAutoStop();
+        _teamMonitorTimer.Stop();
+        _arma3Hud.Dispose();
         UnregisterHotKey(_hwnd, HotkeyId);
         _tray.Dispose();
         _packets.Dispose();
@@ -337,7 +352,12 @@ public partial class MainWindow : Window
     {
         _state = state;
         if (status is not null) SetStatus(status);
-        if (state != RunState.Recording) _clock.Stop();
+        // A room capture stays in RunState.Agent, even while its recorder is active.
+        // RoomChanged calls SetState(Agent) frequently; do not freeze the elapsed timer.
+        bool capturing = state == RunState.Recording || state == RunState.Agent && _run is not null;
+        if (!capturing) _clock.Stop();
+        else if (_run is not null && !_clock.IsEnabled) _clock.Start();
+        if (state is RunState.Idle or RunState.Stopping) CancelAutoStop();
         bool idle = state == RunState.Idle;
         StartStopButton.Content = state switch
         {
@@ -384,7 +404,36 @@ public partial class MainWindow : Window
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
     }
 
-    private void BeginCountdown()
+    private async void BeginCountdown()
+    {
+        if (IsArma3SoloSelected())
+        {
+            if (!IsArma3WindowSelected())
+            {
+                SetStatus(_ => "Arma 3 Team Sync blocked: select the arma3_x64 game window, not the monitor.");
+                return;
+            }
+
+            var preflight = await _arma3Hud.CheckPreflightAsync(GetArma3HostAspectRatio(_agent));
+            if (!preflight.Success)
+            {
+                SetStatus(_ => "Arma 3 Team Sync blocked: " + preflight.Summary);
+                return;
+            }
+
+            var hidden = await _arma3Hud.SetHudHiddenAsync(true);
+            if (!hidden.Success)
+            {
+                SetStatus(_ => "Full HUD Hide failed: " + hidden.Summary);
+                return;
+            }
+            _hudHiddenForCapture = true;
+        }
+
+        BeginCountdownUi();
+    }
+
+    private void BeginCountdownUi()
     {
         _countdownLeft = CountdownSeconds;
         _overlay = new CountdownOverlay();
@@ -397,7 +446,7 @@ public partial class MainWindow : Window
                 ShowCountdown();
                 return;
             }
-            // The overlay is closed before odx record starts, so it never appears in the video.
+            // The overlay is a separate ODX window; Arma 3 window-only capture never records it.
             EndCountdown();
             StartRecording();
         };
@@ -416,6 +465,7 @@ public partial class MainWindow : Window
     private void CancelCountdown()
     {
         EndCountdown();
+        _ = RestoreArma3HudAsync();
         SetState(RunState.Idle, t => t.Cancelled);
     }
 
@@ -438,6 +488,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             string error = ex.Message;
+            _ = RestoreArma3HudAsync();
             SetState(RunState.Idle, t => t.CouldNotStart(error));
             return;
         }
@@ -448,6 +499,7 @@ public partial class MainWindow : Window
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
             SetState(RunState.Recording);
+            ScheduleAutoStop(run);
             _clock.Start();
             ShowRecordingStatus();
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -494,14 +546,46 @@ public partial class MainWindow : Window
             SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
+    private void CancelAutoStop()
+    {
+        var previous = _autoStop;
+        _autoStop = null;
+        previous?.Cancel();
+    }
+
+    private void ScheduleAutoStop(ICaptureRun run)
+    {
+        CancelAutoStop();
+        var cancellation = new CancellationTokenSource();
+        _autoStop = cancellation;
+        _ = AutoStopAsync(run, cancellation.Token);
+    }
+
+    private async Task AutoStopAsync(ICaptureRun run, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(AutoStopAfter, cancellation);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!cancellation.IsCancellationRequested && ReferenceEquals(_run, run) && _state == RunState.Recording)
+                    StopRecording();
+            });
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private void StopRecording()
     {
+        CancelAutoStop();
         SetState(RunState.Stopping, t => t.StoppingStatus);
         _run!.Stop();
     }
 
     private void OnRunCompleted(RunResult result)
     {
+        CancelAutoStop();
+        _ = RestoreArma3HudAsync();
         _run = null;
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
@@ -516,6 +600,12 @@ public partial class MainWindow : Window
         var elapsed = DateTime.Now - _runStarted;
         var status = _run.LastStatus;
         string dir = _run.SessionDir;
+        if (_state == RunState.Agent)
+        {
+            ShowAgentStatus();
+            _tray.Text = _t.TrayTooltip($"{elapsed:hh\\:mm\\:ss}");
+            return;
+        }
         SetStatus(t => t.RecordingStatus(elapsed, status, dir));
         _tray.Text = _t.TrayTooltip($"{elapsed:hh\\:mm\\:ss}");
     }
@@ -571,6 +661,8 @@ public partial class MainWindow : Window
             TimeServer: _config.TimeServer),
             StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
+        agent.PrepareCapture = token => PrepareArma3RoomCaptureAsync(agent, token);
+        agent.FinishCapture = _ => RestoreArma3HudAsync();
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
         room.Changed += () => Dispatcher.BeginInvoke(() =>
         {
@@ -606,12 +698,18 @@ public partial class MainWindow : Window
             if (_room != room) return;
             if (update is null)
             {
+                _teamMonitorTimer.Stop();
+                CancelRoomAutoStop();
                 Disconnect(t => t.RoomClosed);
                 return;
             }
             RoomBox.Text = update.Code;
+            if (string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase)) _teamMonitorTimer.Start();
+            else _teamMonitorTimer.Stop();
+            UpdateRoomAutoStop(room, update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
+            else ShowRecordingStatus();
         });
         agent.RoomError += error => Dispatcher.BeginInvoke(() =>
         {
@@ -666,8 +764,56 @@ public partial class MainWindow : Window
     private static readonly string ZeroTierTray =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ZeroTier", "One", "zerotier_desktop_ui.exe");
 
+    // For an unchanged 0.3.2 online orchestrator, the host supplies the 245-second
+    // stop command to the server. Every member then receives the SAME server Stop
+    // message; upgraded servers may also stop first, in which case this is cancelled.
+    private void UpdateRoomAutoStop(RoomSession room, RoomUpdate update)
+    {
+        if (!room.Agent.IsHost || update.CurrentSession is null)
+        {
+            CancelRoomAutoStop();
+            return;
+        }
+        if (update.Countdown) return; // The 3-2-1 countdown is not part of 245 seconds.
+        if (_roomAutoStopSession == update.CurrentSession) return;
+        CancelRoomAutoStop();
+        string session = update.CurrentSession;
+        var cancel = new CancellationTokenSource();
+        _roomAutoStopSession = session;
+        _roomAutoStop = cancel;
+        _ = StopRoomAfter245Async(room, session, cancel.Token);
+    }
+
+    private async Task StopRoomAfter245Async(RoomSession room, string session, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(AutoStopAfter, cancellation);
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                if (cancellation.IsCancellationRequested || _room != room ||
+                    room.Agent.Room is not { CurrentSession: var current } || current != session ||
+                    !room.Agent.IsHost) return;
+                try { await room.ToggleRoundAsync(0); }
+                catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
+                {
+                    SetStatus(t => t.RoundToggleFailed(e.Message));
+                }
+            });
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void CancelRoomAutoStop()
+    {
+        _roomAutoStop?.Cancel();
+        _roomAutoStop = null;
+        _roomAutoStopSession = null;
+    }
+
     private async void LeaveRoom()
     {
+        CancelRoomAutoStop();
         if (_room is { } room)
         {
             _room = null;  // its RoomChanged(null) is ours, not the host's
@@ -679,6 +825,7 @@ public partial class MainWindow : Window
 
     private async void CloseRoom()
     {
+        CancelRoomAutoStop();
         if (_room is { } room)
         {
             _room = null;
@@ -690,6 +837,7 @@ public partial class MainWindow : Window
 
     private void Disconnect(Func<Strings, string> status)
     {
+        CancelRoomAutoStop();
         _room?.Dispose();
         _room = null;
         if (_run is null) SetState(RunState.Idle, status);
@@ -705,9 +853,11 @@ public partial class MainWindow : Window
         }
         string log = session.LastLog, hotkey = _settings.Hotkey.ToString();
         bool host = session.Agent.IsHost, ready = session.Agent.IsReady;
-        string members = string.Join(" · ", room.Members.Select(m =>
-            m.Name + (m.PlayerId == room.HostPlayerId ? " (host)" : "") + (m.Ready ? " ✓" : "") + _t.MemberState(m.State) +
-            (m.Problem is { } problem ? $" ⚠ {problem}" : "")));
+        var teamStatuses = room.Members
+            .Select(m => (Member: m, Parsed: Arma3TeamStatus.TryParseRoomProblem(m.Problem, out var status) ? status : null))
+            .ToList();
+        var hostTelemetry = teamStatuses.FirstOrDefault(x => x.Member.PlayerId == room.HostPlayerId).Parsed;
+        string members = string.Join(" · ", teamStatuses.Select(x => FormatTeamMember(x.Member, x.Parsed, hostTelemetry, x.Member.PlayerId == room.HostPlayerId)));
         var lan = session.Lan;
         bool? packets = session.Packets;
         var round = _roundResult;
@@ -718,9 +868,281 @@ public partial class MainWindow : Window
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
                        (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
                                                                (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +
+                       (_run is { } activeRun ? "\n" + t.RecordingStatus(DateTime.Now - _runStarted, activeRun.LastStatus, activeRun.SessionDir) : "") +
                        (lan is null ? "" : "\n" + t.LanStatus(lan)) +
                        (packets is { } on ? "\n" + (on ? t.PacketsOn : t.PacketsOff) : "") + "\n" + log + "\n" +
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));
+    }
+
+    private static double? GetArma3HostAspectRatio(AgentClient? agent)
+    {
+        if (agent?.Room is not { } room) return null;
+        var host = room.Members.FirstOrDefault(m => m.PlayerId == room.HostPlayerId);
+        return host is not null && Arma3TeamStatus.TryParseRoomProblem(host.Problem, out var status)
+            ? status?.AspectRatio : null;
+    }
+
+    private static Arma3TeamStatus? GetArma3HostStatus(AgentClient? agent)
+    {
+        if (agent?.Room is not { } room) return null;
+        var host = room.Members.FirstOrDefault(m => m.PlayerId == room.HostPlayerId);
+        return host is not null && Arma3TeamStatus.TryParseRoomProblem(host.Problem, out var status) ? status : null;
+    }
+
+    private bool IsArma3SoloSelected()
+    {
+        if (GameBox.SelectedItem is not GameItem { Path: { Length: > 0 } profilePath }) return false;
+        try { return GameProfile.Load(profilePath).GameTitle.Equals("Arma 3", StringComparison.OrdinalIgnoreCase); }
+        catch (Exception e) when (e is IOException or JsonException or FormatException) { return false; }
+    }
+
+    private bool IsArma3WindowSelected()
+    {
+        string? process = SourceBox.SelectedItem is SourceItem source ? source.Process : _settings.WindowProcess;
+        return string.Equals(process, "arma3_x64", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task RestoreArma3HudAsync()
+    {
+        if (!_hudHiddenForCapture) return;
+        _hudHiddenForCapture = false;
+        try
+        {
+            var result = await _arma3Hud.SetHudHiddenAsync(false);
+            if (!result.Success)
+                SetStatus(_ => "ODX could not restore Arma 3 HUD: " + result.Summary);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            SetStatus(_ => "ODX could not restore Arma 3 HUD: " + e.Message);
+        }
+    }
+
+    private async Task<bool> PrepareArma3RoomCaptureAsync(AgentClient agent, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase)) return true;
+
+        var probe = await agent.CheckCaptureAsync();
+        if (probe is null || !probe.Ok || !probe.Source.StartsWith("window:arma3_x64", StringComparison.OrdinalIgnoreCase))
+            return await CancelArma3RoomRoundAsync(agent, probe is null ? "Arma 3 window capture probe unavailable" : $"capture source must be window:arma3_x64 (current: {probe.Source})");
+
+        var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio, cancellationToken);
+        if (!preflight.Success)
+            return await CancelArma3RoomRoundAsync(agent, preflight.Summary);
+
+        var hidden = await _arma3Hud.SetHudHiddenAsync(true, cancellationToken);
+        if (!hidden.Success)
+            return await CancelArma3RoomRoundAsync(agent, hidden.Summary);
+
+        _hudHiddenForCapture = true;
+        return true;
+    }
+
+    private async Task<bool> CancelArma3RoomRoundAsync(AgentClient agent, string reason)
+    {
+        try
+        {
+            await agent.ReportStateAsync("mismatch|hud-or-preflight", reason, null, CancellationToken.None);
+            if (agent.IsHost)
+                await agent.ToggleRoundAsync(0, CancellationToken.None);
+            else
+                await agent.SetReadyAsync(false, CancellationToken.None);
+        }
+        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException or InvalidOperationException)
+        {
+            reason += "; could not cancel room countdown: " + e.Message;
+        }
+        SetStatus(_ => "Arma 3 room start cancelled: " + reason);
+        return false;
+    }
+
+    private static Arma3TeamStatus BuildArma3PreflightStatus(Arma3Telemetry telemetry) =>
+        new(telemetry.AddonVersion, telemetry.GameFps, telemetry.GameFpsMin,
+            telemetry.Width, telemetry.Height, telemetry.AspectRatio,
+            HudHidden: false, telemetry.MissionOverride, telemetry.DifficultySignature, telemetry.ModsHash,
+            CaptureFps: 0, TargetCaptureFps: 0, DroppedFrames: 0, StarvedFrames: 0,
+            Health: "READY", Issues: [], DateTime.UtcNow);
+
+    private static List<string> CompareArma3Configuration(Arma3TeamStatus reference, Arma3TeamStatus candidate)
+    {
+        var differences = new List<string>();
+        if (!string.Equals(reference.AddonVersion, candidate.AddonVersion, StringComparison.Ordinal))
+            differences.Add("ODX_HUD addon version");
+        if (!string.Equals(reference.ModsHash, candidate.ModsHash, StringComparison.Ordinal))
+            differences.Add("active Mods");
+        if (Math.Abs(reference.AspectRatio - candidate.AspectRatio) > 0.015)
+            differences.Add("screen aspect ratio");
+        if (!string.Equals(reference.DifficultySignature, candidate.DifficultySignature, StringComparison.Ordinal))
+            differences.Add("Difficulty Hide settings");
+        return differences;
+    }
+
+    private static string FormatTeamMember(RoomMember member, Arma3TeamStatus? status, Arma3TeamStatus? hostTelemetry, bool isHost)
+    {
+        string label = member.Name + (member.Ready ? " ✓" : "");
+        if (member.State.StartsWith("mismatch|", StringComparison.Ordinal))
+            label += " ⚠ " + member.State["mismatch|".Length..].Replace('|', ',');
+        else
+            label += " " + member.State;
+
+        if (status is null)
+        {
+            if (member.Problem is { Length: > 0 } problem && !Arma3TeamStatus.TryParseRoomProblem(problem, out _))
+                label += " ⚠ " + problem;
+            else
+                label += " · Team telemetry pending";
+            return label;
+        }
+
+        var issues = status.Issues.ToList();
+        if (!isHost && hostTelemetry is not null)
+        {
+            if (!string.Equals(status.AddonVersion, hostTelemetry.AddonVersion, StringComparison.Ordinal))
+                issues.Add("ODX_HUD addon version mismatch");
+            if (!string.Equals(status.ModsHash, hostTelemetry.ModsHash, StringComparison.Ordinal))
+                issues.Add("Mods mismatch");
+            if (Math.Abs(status.AspectRatio - hostTelemetry.AspectRatio) > 0.015)
+                issues.Add("Aspect ratio mismatch");
+            if (!string.Equals(status.DifficultySignature, hostTelemetry.DifficultySignature, StringComparison.Ordinal))
+                issues.Add("Difficulty mismatch");
+            if (status.TargetCaptureFps > 0 && hostTelemetry.TargetCaptureFps > 0 &&
+                status.TargetCaptureFps != hostTelemetry.TargetCaptureFps)
+                issues.Add("Target capture FPS mismatch");
+        }
+
+        if (status.Health == "OK" && !status.HudHidden) issues.Add("HUD visible");
+        if (status.MissionOverride) issues.Add("mission overrides showHUD");
+        string ratio = status.AspectRatio > 0 ? $"{status.AspectRatio:0.00}:1" : "ratio unknown";
+        string captureFps = status.TargetCaptureFps > 0
+            ? $"{status.CaptureFps:0}/{status.TargetCaptureFps} capture FPS"
+            : "capture FPS set by Room server";
+        string hud = status.Health == "READY" ? "HUD will hide at countdown" : status.HudHidden ? "HUD OFF" : "HUD ON";
+        string summary = $"{status.GameFps:0} game FPS · {captureFps} · {ratio} · {hud}";
+        if (issues.Count > 0 || status.Health is "WARNING" or "CRITICAL")
+            label += " · " + summary + " ⚠ " + string.Join(", ", issues.Distinct());
+        else
+            label += " · " + summary + " · " + status.Health;
+        return label;
+    }
+
+    private async Task UpdateTeamTelemetryAsync()
+    {
+        var agent = _agent;
+        if (_teamMonitorBusy || _room is null || agent is null || agent.GameTitle != "Arma 3" || _run is null) return;
+        _teamMonitorBusy = true;
+        try
+        {
+            var telemetry = _arma3Hud.Latest;
+            var issues = new List<string>();
+            string health = "OK";
+            DateTime now = DateTime.UtcNow;
+            int targetFps = agent.ArmedFps ?? _settings.Fps;
+            if (telemetry is null || now - telemetry.ReceivedUtc > TimeSpan.FromSeconds(3))
+            {
+                issues.Add("Arma 3 HUD/FPS telemetry stale");
+                health = "CRITICAL";
+                _gameFpsLowSince = null;
+                _gameFpsCriticalSince = null;
+            }
+            else
+            {
+                if (telemetry.MissionOverride) issues.Add("mission showHUD[] override");
+                if (!telemetry.FullHudHidden) issues.Add("Full HUD Hide not confirmed");
+                if (!telemetry.DifficultyMatchesGuide) issues.Add("Difficulty/Tactical Ping mismatch");
+
+                if (telemetry.GameFps < targetFps * 0.60)
+                {
+                    _gameFpsCriticalSince ??= now;
+                    if (now - _gameFpsCriticalSince >= TimeSpan.FromSeconds(3))
+                    {
+                        issues.Add($"game FPS critical: {telemetry.GameFps:0.0}/{targetFps}");
+                        health = "CRITICAL";
+                    }
+                }
+                else _gameFpsCriticalSince = null;
+
+                if (telemetry.GameFps < targetFps * 0.80)
+                {
+                    _gameFpsLowSince ??= now;
+                    if (now - _gameFpsLowSince >= TimeSpan.FromSeconds(5))
+                    {
+                        issues.Add($"game FPS low: {telemetry.GameFps:0.0}/{targetFps}");
+                        if (health != "CRITICAL") health = "WARNING";
+                    }
+                }
+                else _gameFpsLowSince = null;
+            }
+
+            var recorder = _run.LastStatus;
+            if (recorder is { Fps: > 0 } && recorder.Fps < targetFps * 0.60)
+            {
+                _captureFpsCriticalSince ??= now;
+                if (now - _captureFpsCriticalSince >= TimeSpan.FromSeconds(3))
+                {
+                    issues.Add($"capture FPS critical: {recorder.Fps:0.0}/{targetFps}");
+                    health = "CRITICAL";
+                }
+            }
+            else _captureFpsCriticalSince = null;
+
+            if (recorder is { Fps: > 0 } && recorder.Fps < targetFps * 0.80)
+            {
+                _captureFpsLowSince ??= now;
+                if (now - _captureFpsLowSince >= TimeSpan.FromSeconds(5))
+                {
+                    issues.Add($"capture FPS low: {recorder.Fps:0.0}/{targetFps}");
+                    if (health != "CRITICAL") health = "WARNING";
+                }
+            }
+            else _captureFpsLowSince = null;
+
+            if (_run is not null && recorder is { Starved: > 0 })
+            {
+                issues.Add($"encoder starved {recorder.Starved} frames");
+                health = "CRITICAL";
+            }
+            else if (_run is not null && recorder is { Dropped: > 0 })
+            {
+                issues.Add($"capture dropped {recorder.Dropped} frames");
+                if (health != "CRITICAL") health = "WARNING";
+            }
+            if (_run?.Problem is { Length: > 0 } captureProblem)
+            {
+                issues.Add("capture: " + captureProblem);
+                health = "CRITICAL";
+            }
+
+            int width = agent.Capture?.Width ?? telemetry?.Width ?? 0;
+            int height = agent.Capture?.Height ?? telemetry?.Height ?? 0;
+            double aspect = width > 0 && height > 0 ? (double)width / height : telemetry?.AspectRatio ?? 0;
+            var status = new Arma3TeamStatus(
+                telemetry?.AddonVersion ?? "missing",
+                telemetry?.GameFps ?? 0,
+                telemetry?.GameFpsMin ?? 0,
+                width,
+                height,
+                aspect,
+                telemetry?.FullHudHidden ?? false,
+                telemetry?.MissionOverride ?? false,
+                telemetry?.DifficultySignature ?? "unknown",
+                telemetry?.ModsHash ?? "unknown",
+                recorder is { Fps: > 0 } ? (int)Math.Round(recorder.Fps) : 0,
+                agent.ArmedFps ?? _settings.Fps,
+                recorder?.Dropped ?? 0,
+                recorder?.Starved ?? 0,
+                health,
+                issues.ToArray(),
+                now);
+            await agent.ReportTeamStatusAsync(status, CancellationToken.None);
+        }
+        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or InvalidOperationException or ObjectDisposedException)
+        {
+            // Room reconnect and capture shutdown are handled by AgentClient; the next tick retries.
+        }
+        finally
+        {
+            _teamMonitorBusy = false;
+        }
     }
 
     private bool _syncingClock;
@@ -740,6 +1162,40 @@ public partial class MainWindow : Window
     private async void ToggleReady()
     {
         if (_room is not { } room) return;
+        var agent = room.Agent;
+
+        // Unready is always allowed, even if the game/addon is no longer available.
+        if (agent.IsReady)
+        {
+            await room.ToggleReadyAsync();
+            if (_run is null) ShowAgentStatus();
+            return;
+        }
+
+        if (string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase))
+        {
+            var probe = await agent.CheckCaptureAsync();
+            if (probe is null || !probe.Ok || !probe.Source.StartsWith("window:arma3_x64", StringComparison.OrdinalIgnoreCase))
+            {
+                string reason = probe is null ? "Arma 3 window capture probe is unavailable" : $"Arma 3 must be captured as a window (current source: {probe.Source})";
+                await agent.ReportStateAsync("mismatch|window-capture", reason);
+                SetStatus(_ => "Team preflight blocked: " + reason);
+                ShowAgentStatus();
+                return;
+            }
+
+            var preflight = await _arma3Hud.CheckPreflightAsync(GetArma3HostAspectRatio(agent));
+            if (!preflight.Success || preflight.Telemetry is null)
+            {
+                await agent.ReportStateAsync("mismatch|hud-preflight", preflight.Summary);
+                SetStatus(_ => "Team preflight blocked: " + preflight.Summary);
+                ShowAgentStatus();
+                return;
+            }
+
+            await agent.ReportTeamReadyAsync(BuildArma3PreflightStatus(preflight.Telemetry));
+        }
+
         await room.ToggleReadyAsync();
         if (_run is null) ShowAgentStatus();
     }
@@ -747,6 +1203,63 @@ public partial class MainWindow : Window
     private async void ToggleRound()
     {
         if (_room is not { } room) return;
+        var agent = room.Agent;
+        if (agent.GameTitle == "Arma 3" && room.Agent.Room is { CurrentSession: null })
+        {
+            if (room.Agent.Room.Members.Count != 4)
+            {
+                SetStatus(_ => $"Arma 3 Team Sync requires exactly 4 members; current room has {room.Agent.Room.Members.Count}.");
+                return;
+            }
+            var probe = await agent.CheckCaptureAsync();
+            if (probe is null || !probe.Ok || !probe.Source.StartsWith("window:arma3_x64", StringComparison.OrdinalIgnoreCase))
+            {
+                string reason = probe is null ? "Arma 3 window capture probe is unavailable" : $"Arma 3 must be captured as a window (current source: {probe.Source})";
+                await agent.ReportStateAsync("mismatch|window-capture", reason);
+                SetStatus(_ => "Team start blocked: " + reason);
+                ShowAgentStatus();
+                return;
+            }
+            var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio);
+            if (!preflight.Success)
+            {
+                await agent.ReportStateAsync("mismatch|" + string.Join(",", preflight.Issues), preflight.Summary);
+                SetStatus(_ => "Team start blocked: " + preflight.Summary);
+                ShowAgentStatus();
+                return;
+            }
+            if (preflight.Telemetry is null)
+            {
+                SetStatus(_ => "Team start blocked: Arma 3 telemetry is missing.");
+                return;
+            }
+
+            var hostStatus = BuildArma3PreflightStatus(preflight.Telemetry);
+            var team = room.Agent.Room.Members.ToList();
+            var missing = team.Where(m => m.PlayerId != room.Agent.Room.HostPlayerId &&
+                !Arma3TeamStatus.TryParseRoomProblem(m.Problem, out _)).Select(m => m.Name).ToList();
+            if (missing.Count > 0)
+            {
+                SetStatus(_ => "Team start blocked: waiting for matching preflight from " + string.Join(", ", missing));
+                return;
+            }
+
+            var mismatch = new List<string>();
+            foreach (var member in team.Where(m => m.PlayerId != room.Agent.Room.HostPlayerId))
+            {
+                if (!Arma3TeamStatus.TryParseRoomProblem(member.Problem, out var status) || status is null) continue;
+                var differences = CompareArma3Configuration(hostStatus, status);
+                if (differences.Count > 0)
+                    mismatch.Add(member.Name + ": " + string.Join(", ", differences));
+            }
+            if (mismatch.Count > 0)
+            {
+                SetStatus(_ => "Team start blocked: configuration mismatch — " + string.Join(" | ", mismatch));
+                return;
+            }
+
+            await agent.ReportTeamReadyAsync(hostStatus);
+        }
         string? task = null;
         if (room.Agent.Room is { CurrentSession: null })
         {
@@ -801,7 +1314,10 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
+            _gameFpsLowSince = _gameFpsCriticalSince = null;
+            _captureFpsLowSince = _captureFpsCriticalSince = null;
             _clock.Start();
+            if (_agent?.GameTitle == "Arma 3") _teamMonitorTimer.Start();
             ShowRecordingStatus();
         });
         run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -814,7 +1330,11 @@ public partial class MainWindow : Window
     private void OnAgentRunCompleted(RunResult result)
     {
         _run = null;
+        _teamMonitorTimer.Stop();
+        _gameFpsLowSince = _gameFpsCriticalSince = null;
+        _captureFpsLowSince = _captureFpsCriticalSince = null;
         _clock.Stop();
+        _ = RestoreArma3HudAsync();
         // The notice comes once the capture is built (RoundKept).
         if (_state == RunState.Stopping) SetState(RunState.Idle, t => t.LeftRoom);
         else ShowAgentStatus();

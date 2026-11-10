@@ -1,0 +1,68 @@
+params [["_hide", true, [true]]];
+
+if (!hasInterface) exitWith { false };
+
+if (_hide) exitWith
+{
+    if (isArray (missionConfigFile >> "showHUD")) exitWith
+    {
+        diag_log "ODX_HUD|ACK|BLOCKED|MISSION_SHOWHUD_ARRAY";
+        false
+    };
+
+    if (isNil "ODX_HUD_original") then
+    {
+        ODX_HUD_original = [
+            shownHUD, shownCompass, shownGPS, shownWatch, shownUAVFeed, shownPad,
+            shownRadio, shownScoretable, shownSubtitles, shownCuratorCompass,
+            shownWarrant, shownChat
+        ];
+    };
+
+    showHUD [false, false, false, false, false, false, false, false, false, false, false];
+    showCompass false;
+    showGPS false;
+    showWatch false;
+    showUAVFeed false;
+    showPad false;
+    showRadio false;
+    showScoretable false;
+    showSubtitles false;
+    showCuratorCompass false;
+    showWarrant false;
+    showChat false;
+
+    ODX_HUD_active = true;
+    diag_log "ODX_HUD|ACK|HIDDEN";
+    true
+};
+
+if (ODX_HUD_active) then
+{
+    private _original = missionNamespace getVariable ["ODX_HUD_original", []];
+    if (count _original > 0 && { _original # 0 }) then
+    {
+        showHUD [true, true, true, true, true, true, true, true, true, true, true];
+    }
+    else
+    {
+        showHUD [false, false, false, false, false, false, false, false, false, false, false];
+    };
+
+    if (count _original > 1) then { showCompass (_original # 1); };
+    if (count _original > 2) then { showGPS (_original # 2); };
+    if (count _original > 3) then { showWatch (_original # 3); };
+    if (count _original > 4) then { showUAVFeed (_original # 4); };
+    if (count _original > 5) then { showPad (_original # 5); };
+    if (count _original > 6) then { showRadio (_original # 6); };
+    if (count _original > 7) then { showScoretable (_original # 7); };
+    if (count _original > 8) then { showSubtitles (_original # 8); };
+    if (count _original > 9) then { showCuratorCompass (_original # 9); };
+    if (count _original > 10) then { showWarrant (_original # 10); };
+    if (count _original > 11) then { showChat (_original # 11); };
+
+    ODX_HUD_active = false;
+    ODX_HUD_original = [];
+    diag_log "ODX_HUD|ACK|RESTORED";
+};
+true

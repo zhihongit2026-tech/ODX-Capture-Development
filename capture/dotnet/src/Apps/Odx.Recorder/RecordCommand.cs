@@ -459,9 +459,19 @@ public static class RecordCommand
         bool locked = Monitor.TryEnter(gate, LastFrameWait);
         if (!locked && encoder is null)
         {
-            // The callback is inside StartEncoder: nothing is recorded yet, and a second encoder must not be started.
-            Monitor.Enter(gate);
-            locked = true;
+            // The callback may be stuck inside StartEncoder while holding gate. Never wait forever or
+            // start a second encoder outside the gate: report the incomplete capture instead.
+            string problem = $"stop timed out waiting for capture callback in '{Volatile.Read(ref captureStep[0])}' before encoder startup";
+            Console.Error.WriteLine(problem);
+            WriteRecordingJson(Meta(0, null, null, problem, AudioNow()));
+            recordingWritten = true;
+            if (opts.JsonStatus)
+                Console.WriteLine(new RecorderStatus(RecorderStatus.Stopped, 0, resampler.Duplicates, resampler.DroppedSourceFrames,
+                    width, height, opts.Fps, problem, AudioNow(), Starved: starvedFrames,
+                    LeadingBlack: resampler.LeadingBlackFrames).ToJson());
+            Console.Out.Flush();
+            Console.Error.Flush();
+            return 1;
         }
         try
         {

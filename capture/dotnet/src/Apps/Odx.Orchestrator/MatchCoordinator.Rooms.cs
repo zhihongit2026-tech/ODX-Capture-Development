@@ -12,6 +12,8 @@ public sealed partial class MatchCoordinator
         room.Members.Add(link);
         link.Room = room;
         link.Ready = false;
+        link.State = "idle";
+        link.Problem = null;
         effects.Changed.Add(room);
         log.LogInformation("{Player} joined room {Room}", link.Id, room.Code);
     }
@@ -130,7 +132,7 @@ public sealed partial class MatchCoordinator
 
     /// <summary>Members other than the host who are not ready (or still busy with the last round).</summary>
     private static List<AgentLink> NotReady(Room room) =>
-        room.Members.Where(a => !room.IsHost(a) && !(a.Ready && a.State is "idle" or "armed")).ToList();
+        room.Members.Where(a => !room.IsHost(a) && !(a.Ready && a.State is "idle" or "armed" or "team-ready")).ToList();
 
     /// <summary>A round of any room, open, finished or stored, already has this session id (two sessions cannot share a folder).</summary>
     /// <summary>

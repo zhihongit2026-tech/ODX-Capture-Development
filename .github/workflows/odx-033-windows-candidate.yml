@@ -1,0 +1,54 @@
+name: ODX 0.3.3 Windows candidate (no release)
+
+on:
+  push:
+    branches:
+      - fix/odx-033-autostop-lastframes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - name: Install video test tools
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+      - name: Build and test .NET
+        working-directory: capture/dotnet
+        shell: pwsh
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
+          dotnet test OdxCapture.sln -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet test failed' }
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+      - uses: actions/cache@v4
+        with:
+          path: capture/dotnet/.cache/ffmpeg-*
+          key: odx-033-ffmpeg-${{ hashFiles('capture/dotnet/ffmpeg/build-ffmpeg.sh') }}
+      - name: Package Windows x64 candidate
+        working-directory: capture/dotnet
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./publish.ps1 -Version 0.3.3
+          if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odx-capture-0.3.3-win-x64-candidate
+          path: capture/dotnet/dist/odx-capture-0.3.3-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

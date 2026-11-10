@@ -10,7 +10,7 @@ services:
       ODX_ACCESS_KEY: ${ODX_ACCESS_KEY:?set ODX_ACCESS_KEY in .env}
       ODX_ZT_TOKEN: ${ODX_ZT_TOKEN:-}
     command: ["odx-orchestrator.dll", "--game-profile", "/app/games/${ODX_GAME_PROFILE:-cs2.json}",
-              "--zerotier-api", "http://zerotier:9993", "--state", "/data/orchestrator.db"]
+              "--fps", "${ODX_FPS:-30}", "--zerotier-api", "http://zerotier:9993", "--state", "/data/orchestrator.db"]
     volumes:
       # Rooms, rounds and the log of every round (SQLite): kept across restarts and image updates.
       - ./state:/data

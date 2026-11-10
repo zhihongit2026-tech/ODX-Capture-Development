@@ -82,7 +82,7 @@ public sealed partial class MatchCoordinator
     {
         room.RoundNumber = e["round"]?.GetValue<int>() ?? room.RoundNumber + 1;
         string sid = GameEvents.Text(e, "session_id") ?? $"{room.MatchId}-r{room.RoundNumber:D2}";
-        var players = room.Members.Where(a => a.State is "idle" or "armed").ToList();
+        var players = room.Members.Where(a => a.State is "idle" or "armed" or "team-ready").ToList();
         foreach (var busy in room.Members.Except(players))
             log.LogWarning("{Player} is {State}, left out of {Session}", busy.Id, busy.State, sid);
         int countdownMs = e["countdown_ms"]?.GetValue<int>() ?? 0;
@@ -107,6 +107,7 @@ public sealed partial class MatchCoordinator
             effects.Sends.Add((a, new Start(sid, countdownMs, utc + countdownMs)));
         }
         if (server is not null) effects.Sends.Add((server, new Start(sid, countdownMs, utc + countdownMs)));
+        if (room.HostPlayerId is not null) effects.TimedRound = round;
         if (countdownMs > 0)
         {
             e["type"] = "round_countdown";
@@ -136,6 +137,18 @@ public sealed partial class MatchCoordinator
             effects.Changed.Add(round.Room);
         }
         log.LogInformation("round {Session}: play started", round.Record.SessionId);
+        await RunAsync(effects);
+    }
+
+    private async Task TimedRoundEndedAsync(OpenRound round)
+    {
+        var effects = new Effects();
+        lock (_lock)
+        {
+            if (round.Room.Current != round || round.Counting || round.Ended) return;
+            EndRound(round.Room, round.Record.StartUtcMs + 245_000, "round_end", "auto_stop_245s", effects);
+        }
+        log.LogInformation("round {Session}: automatic stop after 245 seconds", round.Record.SessionId);
         await RunAsync(effects);
     }
 
