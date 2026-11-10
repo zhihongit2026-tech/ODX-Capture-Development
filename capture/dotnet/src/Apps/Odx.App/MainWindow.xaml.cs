@@ -443,7 +443,8 @@ public partial class MainWindow : Window
         CaptureRun run;
         try
         {
-            run = CaptureRun.Start(_settings.ToCaptureOptions(_config.TimeServer));
+            var options = ApplySelectedTaskFolder(_settings.ToCaptureOptions(_config.TimeServer));
+            run = CaptureRun.Start(options);
         }
         catch (Exception ex)
         {
@@ -452,6 +453,7 @@ public partial class MainWindow : Window
             return;
         }
         _run = run;
+        ObserveCapture(run, _selectedTaskCode, _selectedTaskScope, _selectedTaskPart);
         SetState(RunState.Starting, t => t.StartingCapture);
         run.Started.ContinueWith(_ => Dispatcher.Invoke(() =>
         {
@@ -896,6 +898,7 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
+            ObserveCapture(run, options.DirName, _selectedTaskScope, _selectedTaskPart);
             _clock.Start();
             ShowRecordingStatus();
         });
