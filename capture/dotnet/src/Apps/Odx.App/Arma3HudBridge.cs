@@ -104,7 +104,7 @@ public sealed class Arma3HudBridge : IDisposable
             issues.Add($"Difficulty mismatch (expected six Hide values; got {telemetry.DifficultySignature})");
         if (!telemetry.TacticalPingManagedByOdx)
             issues.Add("ODX could not confirm its Tactical Ping suppression mode");
-        if (Math.Abs(telemetry.AspectRatio - expectedAspectRatio) > 0.015)
+        if (expectedAspectRatio > 0 && Math.Abs(telemetry.AspectRatio - expectedAspectRatio) > 0.015)
             issues.Add($"screen aspect ratio {telemetry.AspectRatio:0.000} differs from target {expectedAspectRatio:0.000}");
 
         await Task.CompletedTask;
