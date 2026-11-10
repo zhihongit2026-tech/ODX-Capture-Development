@@ -440,6 +440,8 @@
                     <TextBlock x:Name="TeamReadyCountText" DockPanel.Dock="Right" Foreground="#91B9F2"
                                FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center"/>
                   </DockPanel>
+                  <Button x:Name="InstallHudButton" Content="Cài đặt @ODX_HUD" Click="InstallArma3Hud_Click"
+                          HorizontalAlignment="Stretch" Margin="0,0,0,7" Padding="10,6"/>
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <ComboBox x:Name="TeamFpsBox" Style="{StaticResource TbrainSettingsComboStyle}"
