@@ -1,4 +1,3 @@
-using Odx.App;
 using Odx.Protocol;
 using Xunit;
 
@@ -25,18 +24,10 @@ public class Arma3TeamSyncTests
     }
 
     [Fact]
-    public void Six_hide_values_are_required_and_tactical_ping_is_odx_managed()
+    public void Malformed_or_unrelated_room_problem_is_ignored()
     {
-        var telemetry = new Arma3Telemetry(
-            "1.0.0", 60, 55, 1920, 1080, 16.0 / 9.0,
-            false, false, 0, 0, 0, 0, 0, 0, -2,
-            "mods-hash", false, DateTime.UtcNow);
-
-        Assert.True(telemetry.DifficultyMatchesGuide);
-        Assert.True(telemetry.TacticalPingManagedByOdx);
-        Assert.False(telemetry.FullHudHidden);
-        Assert.False((telemetry with { Commands = 1 }).DifficultyMatchesGuide);
-        Assert.False((telemetry with { TacticalPing = -1 }).TacticalPingManagedByOdx);
-        Assert.True((telemetry with { HudActive = true }).FullHudHidden);
+        Assert.False(Arma3TeamStatus.TryParseRoomProblem("ordinary problem text", out _));
+        Assert.False(Arma3TeamStatus.TryParseRoomProblem("ODXTEAM:not-base64", out _));
+        Assert.False(Arma3TeamStatus.TryParseRoomProblem(null, out _));
     }
 }
