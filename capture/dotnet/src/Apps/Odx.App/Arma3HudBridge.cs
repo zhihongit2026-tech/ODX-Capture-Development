@@ -35,8 +35,10 @@ public sealed record Arma3Telemetry(
         EnemyTags == 0 &&
         DetectedMines == 0 &&
         Commands == 0 &&
-        Waypoints == 0 &&
-        TacticalPing == 0;
+        Waypoints == 0;
+
+    /// <summary>Tactical Ping is suppressed by ODX through disableMapIndicators during capture; difficultyOption does not expose it.</summary>
+    public bool TacticalPingManagedByOdx => TacticalPing == -2;
 
     public bool FullHudHidden => HudActive && !HudVisible && !MissionOverride;
 
@@ -100,7 +102,9 @@ public sealed class Arma3HudBridge : IDisposable
         if (telemetry.MissionOverride)
             issues.Add("mission Description.ext defines showHUD[]; Full HUD Hide cannot be guaranteed");
         if (!telemetry.DifficultyMatchesGuide)
-            issues.Add($"Difficulty mismatch (expected six Hide values and Tactical Ping off; got {telemetry.DifficultySignature})");
+            issues.Add($"Difficulty mismatch (expected six Hide values; got {telemetry.DifficultySignature})");
+        if (!telemetry.TacticalPingManagedByOdx)
+            issues.Add("ODX could not confirm its Tactical Ping suppression mode");
         if (Math.Abs(telemetry.AspectRatio - expectedAspectRatio) > 0.015)
             issues.Add($"screen aspect ratio {telemetry.AspectRatio:0.000} differs from target {expectedAspectRatio:0.000}");
 
