@@ -79,6 +79,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializeTeam4();
         _obsRows = _settings.RecordWithObs;
         _t = Strings.For(_settings.Language ?? Strings.DefaultLanguage);
         string? configError = null;
@@ -328,6 +329,10 @@ public partial class MainWindow : Window
         switch (_state)
         {
             case RunState.Idle: BeginCountdown(); break;
+            case RunState.Agent when _agent?.Room is { CurrentSession: null } room &&
+                                     _agent.IsHost && IsArma3Room(room) && room.TeamStandard is not null && !_agent.IsReady:
+                ToggleReady();
+                break;
             case RunState.Agent when _agent is { IsHost: true, Room: { } room } &&
                                      (room.CurrentSession is not null || Saving(room).Count == 0 && WaitingFor(room).Count == 0):
                 ToggleRound();
@@ -357,10 +362,20 @@ public partial class MainWindow : Window
             RunState.Stopping => _t.Stopping,
             _ => _t.Stop(_settings.Hotkey.ToString()),
         };
-        StartStopButton.IsEnabled = _trayStartStop.Enabled = state != RunState.Stopping &&
-            !(state == RunState.Agent && (_agent?.Room is not { } room ||
-                                          (!_agent.IsHost && room.CurrentSession is not null) ||
-                                          (_agent.IsHost && room.CurrentSession is null && (Saving(room).Count > 0 || WaitingFor(room).Count > 0))));
+        bool roomButtonEnabled = state != RunState.Stopping;
+        if (state == RunState.Agent)
+        {
+            if (_agent?.Room is not { } room) roomButtonEnabled = false;
+            else if (!_agent.IsHost) roomButtonEnabled = room.CurrentSession is null;
+            else if (room.CurrentSession is null)
+            {
+                bool teamStandardMissing = IsArma3Room(room) && room.TeamStandard is null;
+                bool hostMaySetReady = IsArma3Room(room) && room.TeamStandard is not null && !_agent.IsReady;
+                roomButtonEnabled = Saving(room).Count == 0 && !teamStandardMissing &&
+                    (hostMaySetReady || WaitingFor(room).Count == 0);
+            }
+        }
+        StartStopButton.IsEnabled = _trayStartStop.Enabled = roomButtonEnabled;
         _trayStartStop.Text = state switch
         {
             RunState.Idle => _t.Start,
@@ -569,17 +584,24 @@ public partial class MainWindow : Window
     {
         string hotkey = _settings.Hotkey.ToString();
         if (_agent?.Room is not { } room) return _t.JoiningRoom;
+        if (_agent.IsHost && IsArma3Room(room) && room.CurrentSession is null)
+        {
+            if (room.TeamStandard is null) return "Thiết lập chuẩn đội 30/60 FPS";
+            if (!_agent.IsReady) return _t.ReadyButton(hotkey);
+        }
         if (_agent.IsHost && room.CurrentSession is null && Saving(room) is { Count: > 0 } saving) return _t.WaitingSaving(saving.Count);
         if (_agent.IsHost && room.CurrentSession is null && WaitingFor(room) is { Count: > 0 } waiting)
-            return _t.WaitingReady(room.Members.Count - 1 - waiting.Count, room.Members.Count - 1);
+            return _t.WaitingReady(Math.Max(0, room.Members.Count - waiting.Count), room.Members.Count);
         if (_agent.IsHost) return room.CurrentSession is null ? _t.StartRound(hotkey) : _t.EndRound(hotkey);
         if (room.CurrentSession is not null) return _t.InRound;
         return _agent.IsReady ? _t.UnreadyButton(hotkey) : _t.ReadyButton(hotkey);
     }
 
-    /// <summary>The other members the host waits for (the orchestrator checks the same before a round starts).</summary>
-    private static List<RoomMember> WaitingFor(RoomUpdate room) =>
-        room.Members.Where(m => m.PlayerId != room.HostPlayerId && !(m.Ready && m.State is "idle" or "armed")).ToList();
+    /// <summary>For Arma 3 the host is included; every participant must pass preflight and READY.</summary>
+    private List<RoomMember> WaitingFor(RoomUpdate room) =>
+        IsArma3Room(room)
+            ? room.Members.Where(m => !(m.Ready && (m.State is "idle" or "armed")) || m.PreflightProblem is not null).ToList()
+            : room.Members.Where(m => m.PlayerId != room.HostPlayerId && !(m.Ready && (m.State is "idle" or "armed"))).ToList();
 
     /// <summary>Members, the host included, still saving the last round (the orchestrator refuses a new round until they are done).</summary>
     private static List<RoomMember> Saving(RoomUpdate room) => room.Members.Where(m => m.State is "starting" or "recording" or "saving").ToList();
@@ -615,6 +637,17 @@ public partial class MainWindow : Window
             TimeServer: _config.TimeServer),
             StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
+        agent.BeforeCaptureStartAsync = async (sessionId, token) =>
+        {
+            if (!IsArma3Room(agent.Room ?? new RoomUpdate("", null, [], null, false, Game: IsArma3Selected ? "Arma 3" : null)))
+                return true;
+            return await _arma3Hud.HideAsync(TimeSpan.FromSeconds(6), token);
+        };
+        agent.AfterCaptureStoppedAsync = async (sessionId, token) =>
+        {
+            if (IsArma3Selected || string.Equals(agent.Room?.Game, "Arma 3", StringComparison.OrdinalIgnoreCase))
+                _ = await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(5), token);
+        };
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
         room.Changed += () => Dispatcher.BeginInvoke(() =>
         {
@@ -656,6 +689,7 @@ public partial class MainWindow : Window
             }
             RoomBox.Text = update.Code;
             UpdateRoomAutoStop(room, update);
+            UpdateTeamControlPanel(update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
             else ShowRecordingStatus();
@@ -800,10 +834,12 @@ public partial class MainWindow : Window
             SetStatus(t => t.JoiningRoom);
             return;
         }
+        UpdateTeamControlPanel(room);
         string log = session.LastLog, hotkey = _settings.Hotkey.ToString();
         bool host = session.Agent.IsHost, ready = session.Agent.IsReady;
         string members = string.Join(" · ", room.Members.Select(m =>
             m.Name + (m.PlayerId == room.HostPlayerId ? " (host)" : "") + (m.Ready ? " ✓" : "") + _t.MemberState(m.State) +
+            (m.PreflightProblem is { } preflight ? $" ⚠ {preflight}" : "") +
             (m.Problem is { } problem ? $" ⚠ {problem}" : "")));
         var lan = session.Lan;
         bool? packets = session.Packets;
@@ -836,9 +872,7 @@ public partial class MainWindow : Window
 
     private async void ToggleReady()
     {
-        if (_room is not { } room) return;
-        await room.ToggleReadyAsync();
-        if (_run is null) ShowAgentStatus();
+        await ToggleReadyTeamAwareAsync();
     }
 
     private async void ToggleRound()
