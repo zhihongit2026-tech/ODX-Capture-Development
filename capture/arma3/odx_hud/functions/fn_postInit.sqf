@@ -35,34 +35,38 @@ ODX_HUD_version = "1.0.0";
     };
 };
 
-// Reapply while active in case another script/mod tries to show HUD again.
-// A mission with showHUD[] is detected and blocked before capture instead.
-addMissionEventHandler ["EachFrame",
+// Reapply at 4 Hz while active in case another script/mod tries to show HUD again.
+// This is deliberately not an EachFrame handler to avoid adding per-frame work.
+0 spawn
 {
-    if (missionNamespace getVariable ["ODX_HUD_active", false]) then
+    while { true } do
     {
-        if (isArray (missionConfigFile >> "showHUD")) then
+        if (missionNamespace getVariable ["ODX_HUD_active", false]) then
         {
-            ODX_HUD_active = false;
-            diag_log "ODX_HUD|ACK|BLOCKED|MISSION_SHOWHUD_ARRAY";
-        }
-        else
-        {
-            showHUD [false, false, false, false, false, false, false, false, false, false, false];
-            showCompass false;
-            showGPS false;
-            showWatch false;
-            showUAVFeed false;
-            showPad false;
-            showRadio false;
-            showScoretable false;
-            showSubtitles false;
-            showCuratorCompass false;
-            showWarrant false;
-            showChat false;
+            if (isArray (missionConfigFile >> "showHUD")) then
+            {
+                ODX_HUD_active = false;
+                diag_log "ODX_HUD|ACK|BLOCKED|MISSION_SHOWHUD_ARRAY";
+            }
+            else
+            {
+                showHUD [false, false, false, false, false, false, false, false, false, false, false];
+                showCompass false;
+                showGPS false;
+                showWatch false;
+                showUAVFeed false;
+                showPad false;
+                showRadio false;
+                showScoretable false;
+                showSubtitles false;
+                showCuratorCompass false;
+                showWarrant false;
+                showChat false;
+            };
         };
+        sleep 0.25;
     };
-}];
+};
 
 addMissionEventHandler ["MPEnded", { [false] call ODX_fnc_setHud; }];
 addMissionEventHandler ["Ended", { [false] call ODX_fnc_setHud; }];
