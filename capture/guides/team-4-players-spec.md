@@ -6,6 +6,38 @@
 
 This document records the approved operating rules for a four-person Arma 3 recording team. It is a requirements specification, not evidence that the features have already been implemented or tested.
 
+## 0. Non-negotiable ODX 0.3.3 feature-preservation requirement
+
+**The complete ODX Capture 0.3.3 feature set is the immutable compatibility baseline. ODX 0.3.4 is an additive upgrade, not a replacement or rewrite. No existing 0.3.3 feature may be removed, silently disabled, degraded, or made inaccessible.**
+
+The following existing capabilities must remain available and behave as before:
+
+- Local gameplay capture, source selection, countdown, start/stop and output finalization.
+- Existing capture profiles/game detection and all existing game-specific settings.
+- Room Online: create/join Room, member identity, host/member roles, presence/heartbeat, clock synchronization, round/session synchronization and existing Room controls.
+- Existing Task ID entry/selection and the approved Task ID folder naming behavior.
+- Existing recording FPS options, capture resolution/source, frame-rate handling and output format.
+- GPU acceleration, NVENC and existing encoder fallbacks/settings.
+- Audio capture, audio-device selection and existing audio behavior.
+- Existing hotkeys, including F10, and all other configured shortcuts.
+- Existing game profiles, OBS/source configuration, application settings and user preferences.
+- Existing authentication, server endpoints, access keys, Room protocol compatibility and data/output locations.
+- Existing launcher, dependencies, FFmpeg packaging and normal startup/shutdown behavior.
+
+### Preservation rules
+
+1. Keep the verified ODX 0.3.3 source and Windows package as a recoverable, untouched baseline. Develop 0.3.4 on a separate branch/copy.
+2. Prefer additive modules/adapters for Task Board, HUD Bridge, Team Control and Performance Monitor. Do not rewrite the capture engine or Room implementation to add these features.
+3. Do not remove, rename incompatibly, repurpose, or silently change an existing control, setting, hotkey, protocol field, file format, server endpoint or default.
+4. UI rearrangement is allowed only if every original control and capability remains accessible and operational. Collapsing a settings group must not remove its settings.
+5. Any unavoidable change to a shared 0.3.3 code path must be isolated, documented and regression-tested against the old behavior. If compatibility cannot be demonstrated, stop and request the user's separate approval before proceeding.
+6. Before packaging, compare the candidate against the 0.3.3 baseline: source diff, dependency/configuration diff, protocol compatibility, original regression suite, and hashes of preserved binaries/resources.
+7. A successful build or unchanged binary hash alone is not proof of feature preservation. Run functional regression tests for recording, Room, Task ID, FPS, NVENC, audio, hotkeys, profiles, settings, startup and shutdown.
+8. If any existing feature fails, the candidate is not accepted and must not be presented as ready to use. Fix the regression or revert the affected integration; never solve it by dropping the old feature.
+9. Keep the original 0.3.3 package available for immediate rollback. Do not overwrite it or replace it with a candidate.
+
+**Acceptance gate:** ODX 0.3.4 may be handed over only when all applicable original 0.3.3 features pass regression testing and the new Team 4 Players features pass their own tests. If a test cannot be performed (for example, four physical PCs), report it as NOT TESTED; do not label it PASS.
+
 ## 1. Team model
 
 - A Room recording team contains exactly four connected participants: one host/team leader and three members.
@@ -158,12 +190,13 @@ A candidate is not accepted until the following tests pass on four real Windows 
 
 ## 11. Compatibility and implementation constraints
 
-- Preserve the ODX 0.3.3 capture engine, NVENC/x264, audio, hotkeys, Task ID and existing Room behavior wherever possible.
+- Apply the non-negotiable 0.3.3 feature-preservation requirement in Section 0. No existing capability may be dropped or degraded.
+- Preserve the ODX 0.3.3 capture engine, NVENC/x264, audio, hotkeys, Task ID, profiles, settings, launcher, authentication and existing Room behavior.
 - New readiness data, performance telemetry and team-stop coordination must be versioned and validated in the Room protocol/coordinator; do not rely on UI-only checks.
 - Identify and build the actual Room/orchestrator service source before claiming the 4/4 server-side readiness gate or team-wide stop is complete.
 - Do not change authentication, server addresses, access keys or existing Room security behavior without separate approval.
 - Use synthetic tests first, then four-PC acceptance tests.
-- A successful EXE build or unit-test run alone does not constitute acceptance of the four-PC workflow.
+- A successful EXE build, unchanged core hashes or unit-test run alone does not constitute acceptance of feature preservation or the four-PC workflow.
 - Keep the 0.3.3 baseline and previous candidates recoverable. Do not create a public release until the user accepts the tested candidate.
 
 ## 12. Approved decisions summary
