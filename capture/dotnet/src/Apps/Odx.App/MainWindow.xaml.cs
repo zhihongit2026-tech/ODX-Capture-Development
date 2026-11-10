@@ -698,11 +698,14 @@ public partial class MainWindow : Window
             if (_room != room) return;
             if (update is null)
             {
+                _teamMonitorTimer.Stop();
                 CancelRoomAutoStop();
                 Disconnect(t => t.RoomClosed);
                 return;
             }
             RoomBox.Text = update.Code;
+            if (string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase)) _teamMonitorTimer.Start();
+            else _teamMonitorTimer.Stop();
             UpdateRoomAutoStop(room, update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
@@ -1078,17 +1081,17 @@ public partial class MainWindow : Window
             }
             else _captureFpsLowSince = null;
 
-            if (recorder is { Starved: > 0 })
+            if (_run is not null && recorder is { Starved: > 0 })
             {
                 issues.Add($"encoder starved {recorder.Starved} frames");
                 health = "CRITICAL";
             }
-            else if (recorder is { Dropped: > 0 })
+            else if (_run is not null && recorder is { Dropped: > 0 })
             {
                 issues.Add($"capture dropped {recorder.Dropped} frames");
                 if (health != "CRITICAL") health = "WARNING";
             }
-            if (_run.Problem is { Length: > 0 } captureProblem)
+            if (_run?.Problem is { Length: > 0 } captureProblem)
             {
                 issues.Add("capture: " + captureProblem);
                 health = "CRITICAL";
