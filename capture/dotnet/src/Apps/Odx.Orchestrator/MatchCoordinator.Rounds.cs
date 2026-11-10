@@ -16,6 +16,15 @@ public sealed partial class MatchCoordinator
         Stamp(room, e, utc, effects);
         effects.Changed.Add(room);
 
+        if (type == GameEvents.RoundStart && IsArma3Room(room) &&
+            (room.Members.Count != 4 || NotReady(room).Count > 0 ||
+             room.TeamStandard is not { IsValid: true, HostSnapshot: not null }))
+        {
+            e["team_blocked"] = true;
+            log.LogWarning("room {Room}: Arma 3 round start refused; team is not 4/4 READY with a valid Team Standard", room.Code);
+            return;
+        }
+
         if (room.Current is { Counting: true } counting &&
             type is GameEvents.RoundStart or GameEvents.RoundEnd or GameEvents.MatchStart or GameEvents.MatchEnd)
         {
@@ -103,7 +112,8 @@ public sealed partial class MatchCoordinator
         foreach (var a in players)
         {
             a.State = "starting";
-            effects.Sends.Add((a, new Arm(sid, _profileJson, options.Fps)));
+            effects.Sends.Add((a, new Arm(sid, _profileJson,
+                IsArma3Room(room) ? room.TeamStandard!.RecordingFps : options.Fps)));
             effects.Sends.Add((a, new Start(sid, countdownMs, utc + countdownMs)));
         }
         if (server is not null) effects.Sends.Add((server, new Start(sid, countdownMs, utc + countdownMs)));
