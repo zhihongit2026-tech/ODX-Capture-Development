@@ -414,7 +414,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio);
+            var preflight = await _arma3Hud.CheckPreflightAsync(GetArma3HostAspectRatio(_agent));
             if (!preflight.Success)
             {
                 SetStatus(_ => "Arma 3 Team Sync blocked: " + preflight.Summary);
@@ -874,6 +874,21 @@ public partial class MainWindow : Window
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));
     }
 
+    private static double? GetArma3HostAspectRatio(AgentClient? agent)
+    {
+        if (agent?.Room is not { } room) return null;
+        var host = room.Members.FirstOrDefault(m => m.PlayerId == room.HostPlayerId);
+        return host is not null && Arma3TeamStatus.TryParseRoomProblem(host.Problem, out var status)
+            ? status?.AspectRatio : null;
+    }
+
+    private static Arma3TeamStatus? GetArma3HostStatus(AgentClient? agent)
+    {
+        if (agent?.Room is not { } room) return null;
+        var host = room.Members.FirstOrDefault(m => m.PlayerId == room.HostPlayerId);
+        return host is not null && Arma3TeamStatus.TryParseRoomProblem(host.Problem, out var status) ? status : null;
+    }
+
     private bool IsArma3SoloSelected()
     {
         if (GameBox.SelectedItem is not GameItem { Path: { Length: > 0 } profilePath }) return false;
@@ -1169,7 +1184,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio);
+            var preflight = await _arma3Hud.CheckPreflightAsync(GetArma3HostAspectRatio(agent));
             if (!preflight.Success || preflight.Telemetry is null)
             {
                 await agent.ReportStateAsync("mismatch|hud-preflight", preflight.Summary);
