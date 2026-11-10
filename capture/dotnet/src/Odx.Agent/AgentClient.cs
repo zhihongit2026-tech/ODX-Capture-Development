@@ -567,11 +567,15 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             try { ready = await beforeHud(s.SessionId, stopped); }
             catch (Exception e)
             {
+                if (AfterCaptureStoppedAsync is { } restorePreflightFailure)
+                    try { await restorePreflightFailure(s.SessionId, stop); } catch (Exception restoreError) { Log?.Invoke($"HUD restore: {restoreError.Message}"); }
                 await EndWithoutCaptureAsync(s.SessionId, $"HUD preflight failed: {e.Message}", stop);
                 return;
             }
             if (!ready)
             {
+                if (AfterCaptureStoppedAsync is { } restoreNotReady)
+                    try { await restoreNotReady(s.SessionId, stop); } catch (Exception restoreError) { Log?.Invoke($"HUD restore: {restoreError.Message}"); }
                 await EndWithoutCaptureAsync(s.SessionId, "HUD was not confirmed hidden; round not recorded", stop);
                 return;
             }
