@@ -236,7 +236,16 @@ public static class TeamPreflightComparer
         Compare("Game", expected.GameTitle, actual.GameTitle);
         Compare("Game version", expected.GameVersion, actual.GameVersion);
         Compare("Mod set", expected.ModFingerprint, actual.ModFingerprint);
-        Compare("Game settings", expected.SettingsFingerprint, actual.SettingsFingerprint);
+        var settingKeys = expected.Settings.Keys.Union(actual.Settings.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settingKeys)
+        {
+            string expectedValue = expected.Settings.TryGetValue(key, out var left) ? left : "<missing>";
+            string actualValue = actual.Settings.TryGetValue(key, out var right) ? right : "<missing>";
+            Compare(key, expectedValue, actualValue);
+        }
+        if (differences.Count == 0)
+            Compare("Game settings fingerprint", expected.SettingsFingerprint, actual.SettingsFingerprint);
         Compare("Resolution", $"{expected.ScreenWidth}x{expected.ScreenHeight}", $"{actual.ScreenWidth}x{actual.ScreenHeight}");
         if (Math.Abs(expected.AspectRatio - actual.AspectRatio) > 0.01)
             differences.Add($"Aspect ratio: expected {expected.AspectRatio:0.###}, actual {actual.AspectRatio:0.###}");
