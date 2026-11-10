@@ -983,7 +983,7 @@ public partial class MainWindow : Window
                 issues.Add("Aspect ratio mismatch");
             if (!string.Equals(status.DifficultySignature, hostTelemetry.DifficultySignature, StringComparison.Ordinal))
                 issues.Add("Difficulty mismatch");
-            if (status.CaptureFps != hostTelemetry.CaptureFps)
+            if (status.CaptureFps > 0 && hostTelemetry.CaptureFps > 0 && status.CaptureFps != hostTelemetry.CaptureFps)
                 issues.Add("Capture FPS mismatch");
         }
 
