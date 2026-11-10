@@ -898,7 +898,7 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
-            ObserveCapture(run, options.DirName, _selectedTaskScope, _selectedTaskPart);
+            ObserveCapture(run, options.DirName);
             _clock.Start();
             ShowRecordingStatus();
         });
