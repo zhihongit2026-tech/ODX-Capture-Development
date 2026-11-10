@@ -979,6 +979,8 @@ public partial class MainWindow : Window
         var issues = status.Issues.ToList();
         if (!isHost && hostTelemetry is not null)
         {
+            if (!string.Equals(status.AddonVersion, hostTelemetry.AddonVersion, StringComparison.Ordinal))
+                issues.Add("ODX_HUD addon version mismatch");
             if (!string.Equals(status.ModsHash, hostTelemetry.ModsHash, StringComparison.Ordinal))
                 issues.Add("Mods mismatch");
             if (Math.Abs(status.AspectRatio - hostTelemetry.AspectRatio) > 0.015)
