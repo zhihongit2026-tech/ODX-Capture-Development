@@ -11,7 +11,7 @@ public class Arma3TeamSyncTests
         var status = new Arma3TeamStatus(
             "1.0.0", 59.8, 54.2, 1920, 1080, 16.0 / 9.0,
             true, false, "0,0,0,0,0,0,-2", "mods-hash",
-            60, 0, 0, "OK", [], DateTime.UtcNow);
+            58, 60, 0, 0, "OK", [], DateTime.UtcNow);
 
         string encoded = status.ToRoomProblem();
         Assert.StartsWith("ODXTEAM:", encoded);
@@ -20,6 +20,7 @@ public class Arma3TeamSyncTests
         Assert.Equal(status.AddonVersion, parsed!.AddonVersion);
         Assert.Equal(status.ModsHash, parsed.ModsHash);
         Assert.Equal(status.CaptureFps, parsed.CaptureFps);
+        Assert.Equal(status.TargetCaptureFps, parsed.TargetCaptureFps);
         Assert.Equal(status.DifficultySignature, parsed.DifficultySignature);
     }
 
