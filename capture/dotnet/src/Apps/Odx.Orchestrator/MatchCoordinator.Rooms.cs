@@ -23,6 +23,11 @@ public sealed partial class MatchCoordinator
         room.Members.Remove(link);
         link.Room = null;
         link.Ready = false;
+        link.Preflight = null;
+        link.PreflightProblem = null;
+        link.Performance = null;
+        link.PerformanceProblem = null;
+        link.SevereSinceUtc = null;
         // "reconnected": this connection died after the agent's new one came in; the new one holds its LAN node and rounds.
         bool replaced = reason == "reconnected";
         if (!replaced && room.LanNetworkId is { } network && link.LanNode is { } node)
@@ -120,6 +125,14 @@ public sealed partial class MatchCoordinator
 
     private void SetReady(Room room, AgentLink link, bool ready, Effects effects)
     {
+        if (ready && IsArma3Room(room) &&
+            (room.TeamStandard is not { IsValid: true, HostSnapshot: not null } || link.PreflightProblem is not null))
+        {
+            effects.Sends.Add((link, new RoomError(link.PreflightProblem ??
+                "Team Standard is not set or the host preflight is incomplete.")));
+            return;
+        }
+
         link.Ready = ready;
         effects.Changed.Add(room);
         Apply(room, new JsonObject { ["type"] = ready ? "player_ready" : "player_unready", ["player"] = link.Id,
@@ -128,9 +141,14 @@ public sealed partial class MatchCoordinator
             Cancel(counting, $"player_unready:{link.Id}", effects);
     }
 
-    /// <summary>Members other than the host who are not ready (or still busy with the last round).</summary>
-    private static List<AgentLink> NotReady(Room room) =>
-        room.Members.Where(a => !room.IsHost(a) && !(a.Ready && a.State is "idle" or "armed")).ToList();
+    /// <summary>For Arma 3 all four members, including the host, must be ready and pass preflight.</summary>
+    private List<AgentLink> NotReady(Room room)
+    {
+        static bool ReadyAndIdle(AgentLink member) => member.Ready && (member.State is "idle" or "armed");
+        return IsArma3Room(room)
+            ? room.Members.Where(member => !ReadyAndIdle(member) || member.PreflightProblem is not null).ToList()
+            : room.Members.Where(member => !room.IsHost(member) && !ReadyAndIdle(member)).ToList();
+    }
 
     /// <summary>A round of any room, open, finished or stored, already has this session id (two sessions cannot share a folder).</summary>
     /// <summary>
