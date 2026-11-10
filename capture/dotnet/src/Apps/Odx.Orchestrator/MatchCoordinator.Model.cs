@@ -18,6 +18,7 @@ public sealed partial class MatchCoordinator
         public bool Ready { get; set; }
         public TeamPreflightSnapshot? Preflight { get; set; }
         public string? PreflightProblem { get; set; }
+        public string? PerformanceProblem { get; set; }
         public PerformanceTelemetry? Performance { get; set; }
         public DateTime? SevereSinceUtc { get; set; }
         public Room? Room { get; set; }
