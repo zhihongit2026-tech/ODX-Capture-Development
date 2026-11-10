@@ -5,7 +5,7 @@ using Microsoft.Win32;
 
 namespace Odx.App;
 
-public sealed record Arma3HudInstallResult(string GameRoot, string ModPath, string? PreviousBackup);
+public sealed record Arma3HudInstallResult(string GameRoot, string ModPath, string ExtensionPath, string? PreviousBackup, string? PreviousExtensionBackup);
 
 public static class Arma3HudInstaller
 {
@@ -70,28 +70,41 @@ public static class Arma3HudInstaller
             throw new FileNotFoundException("Gói ODX chưa có odx_hud.pbo hoặc ODX_HUD_x64.dll. Hãy dùng bản build có kèm Arma 3 HUD Bridge.");
 
         string destination = Path.Combine(gameRoot, "@ODX_HUD");
+        string extensionDestination = Path.Combine(gameRoot, "ODX_HUD_x64.dll");
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
         string? backup = null;
+        string? extensionBackup = null;
         if (Directory.Exists(destination))
         {
-            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
             backup = destination + ".backup-" + stamp;
             Directory.Move(destination, backup);
+        }
+        if (File.Exists(extensionDestination))
+        {
+            extensionBackup = extensionDestination + ".backup-" + stamp;
+            File.Move(extensionDestination, extensionBackup);
         }
 
         try
         {
             CopyDirectory(source, destination);
+            // Arma 3 callExtension loads native extension DLLs from the game root.
+            File.Copy(sourceDll, extensionDestination, overwrite: false);
             if (!File.Exists(Path.Combine(destination, "addons", "odx_hud.pbo")) ||
-                !File.Exists(Path.Combine(destination, "ODX_HUD_x64.dll")))
+                !File.Exists(extensionDestination))
                 throw new IOException("Kiểm tra sau cài đặt @ODX_HUD không thành công.");
-            return new Arma3HudInstallResult(gameRoot, destination, backup);
+            return new Arma3HudInstallResult(gameRoot, destination, extensionDestination, backup, extensionBackup);
         }
         catch
         {
             if (Directory.Exists(destination))
                 Directory.Delete(destination, recursive: true);
+            if (File.Exists(extensionDestination))
+                File.Delete(extensionDestination);
             if (backup is not null && Directory.Exists(backup) && !Directory.Exists(destination))
                 Directory.Move(backup, destination);
+            if (extensionBackup is not null && File.Exists(extensionBackup) && !File.Exists(extensionDestination))
+                File.Move(extensionBackup, extensionDestination);
             throw;
         }
     }
