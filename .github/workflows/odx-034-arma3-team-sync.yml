@@ -1,0 +1,58 @@
+name: ODX 0.3.4 Arma 3 Team Sync candidate
+
+on:
+  push:
+    branches:
+      - feature/arma3-team-sync-hud-monitor
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64-candidate:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - name: Install video test tools
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+      - name: Build and test .NET solution
+        working-directory: capture/dotnet
+        shell: pwsh
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
+          dotnet test OdxCapture.sln -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet test failed' }
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+      - uses: actions/cache@v4
+        with:
+          path: capture/dotnet/.cache/ffmpeg-*
+          key: odx-034-ffmpeg-${{ hashFiles('capture/dotnet/ffmpeg/build-ffmpeg.sh') }}
+      - name: Package Windows x64 candidate with ODX HUD addon
+        working-directory: capture/dotnet
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./publish.ps1 -Version 0.3.4
+          if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
+          if (-not (Test-Path 'dist/odx-capture-0.3.4-win-x64/@ODX_HUD/addons/odx_hud/config.cpp')) {
+            throw 'ODX HUD local mod was not included'
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odx-capture-0.3.4-win-x64-candidate
+          path: capture/dotnet/dist/odx-capture-0.3.4-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14
