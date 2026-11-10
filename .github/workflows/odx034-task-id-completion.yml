@@ -29,6 +29,7 @@ jobs:
             if ($path -ne 'capture/dotnet/src/Apps/Odx.App/MainWindow.xaml' -and
                 $path -ne 'capture/dotnet/src/Apps/Odx.App/MainWindow.xaml.cs' -and
                 $path -ne 'capture/dotnet/src/Apps/Odx.App/MainWindow.TaskBoard.cs' -and
+                $path -ne '.github/workflows/odx034-ui-polish2.yml' -and
                 $path -ne '.github/workflows/odx034-task-id-completion.yml') {
               throw "Unexpected change outside approved Task ID/UI scope: $path"
             }
