@@ -96,8 +96,9 @@ addMissionEventHandler ["Ended", { [false] call ODX_fnc_setHud; }];
         _addons sort true;
         private _modsHash = hashValue (str _addons);
         private _missionOverride = isArray (missionConfigFile >> "showHUD");
+        private _hudState = shownHUD;
         private _hudVisible =
-            shownHUD ||
+            ((_hudState findIf { _x }) >= 0) ||
             shownCompass ||
             shownGPS ||
             shownWatch ||
@@ -117,7 +118,7 @@ addMissionEventHandler ["Ended", { [false] call ODX_fnc_setHud; }];
             diag_fpsMin,
             _resolution # 0,
             _resolution # 1,
-            _resolution # 2,
+            _resolution # 4,
             _hudVisible,
             _missionOverride,
             _difficulty # 0,
