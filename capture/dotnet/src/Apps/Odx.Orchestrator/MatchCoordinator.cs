@@ -346,7 +346,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             ["name"] = a.Hello.Name,
             ["version"] = a.Hello.ToolVersion,
             ["state"] = a.State,
-            ["problem"] = a.Problem ?? a.PerformanceProblem,
+            ["problem"] = string.Join("; ", new[] { a.Problem, a.PerformanceProblem }.Where(value => !string.IsNullOrWhiteSpace(value))),
             ["ready"] = a.Ready,
             ["preflight"] = a.Preflight is null ? null : System.Text.Json.JsonSerializer.SerializeToNode(a.Preflight, AgentMessage.Json),
             ["preflight_problem"] = a.PreflightProblem,
@@ -368,7 +368,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             {
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
                     r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State,
-                        a.Problem ?? a.PerformanceProblem, a.Preflight, a.PreflightProblem, a.Performance)).ToList(),
+                        string.Join("; ", new[] { a.Problem, a.PerformanceProblem }.Where(value => !string.IsNullOrWhiteSpace(value))), a.Preflight, a.PreflightProblem, a.Performance)).ToList(),
                     r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId, r.TeamStandard, r.Game);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();
