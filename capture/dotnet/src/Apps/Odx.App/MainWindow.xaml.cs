@@ -496,7 +496,7 @@ public partial class MainWindow : Window
         _run = run;
         ObserveCapture(run, _selectedTaskCode, _selectedTaskScope, _selectedTaskPart);
         SetState(RunState.Starting, t => t.StartingCapture);
-        run.Started.ContinueWith(_ => Dispatcher.Invoke(() =>
+        _ = run.Started.ContinueWith(_ => Dispatcher.Invoke(() =>
         {
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
@@ -512,7 +512,7 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(() => ShowProcessingBadge(run));
         }, TaskScheduler.Default).Unwrap();
         run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));
-        run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnRunCompleted(t.Result)),
+        _ = run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnRunCompleted(t.Result)),
             TaskContinuationOptions.OnlyOnRanToCompletion);
     }
 
