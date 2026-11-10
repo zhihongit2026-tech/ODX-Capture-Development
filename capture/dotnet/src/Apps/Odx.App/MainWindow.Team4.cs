@@ -168,6 +168,22 @@ public partial class MainWindow
         }
 
         var snapshot = _arma3Hud.ToTeamSnapshot(confirmed, recordingFps);
+        if (snapshot.Settings.TryGetValue("difficulty.tacticalPing", out var tacticalPing) &&
+            tacticalPing.Equals("UNVERIFIED", StringComparison.OrdinalIgnoreCase))
+        {
+            TacticalPingManualCheckBox.Visibility = Visibility.Visible;
+            if (TacticalPingManualCheckBox.IsChecked != true)
+            {
+                TeamPreflightStatus.Text = "Arma 3 không cung cấp Tactical Ping qua API trên bản game này. Hãy đặt Tactical Ping = Off trong Game Options rồi tích xác nhận thủ công.";
+                return false;
+            }
+            snapshot.Settings["difficulty.tacticalPing"] = "manual-verified-off";
+        }
+        else
+        {
+            TacticalPingManualCheckBox.Visibility = Visibility.Collapsed;
+            TacticalPingManualCheckBox.IsChecked = false;
+        }
         await _agent.ReportPreflightAsync(snapshot, CancellationToken.None);
         TeamPreflightStatus.Text = "Đã gửi cấu hình, độ phân giải, tỷ lệ màn hình, mod, HUD và FPS ghi hình để đối chiếu với Team Standard.";
         return true;
