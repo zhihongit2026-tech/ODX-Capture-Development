@@ -75,7 +75,7 @@ public partial class MainWindow : Window
     private bool _hudHiddenForCapture, _teamMonitorBusy;
     private DateTime? _gameFpsLowSince, _gameFpsCriticalSince;
     private DateTime? _captureFpsLowSince, _captureFpsCriticalSince;
-    private const double Arma3ExpectedAspectRatio = 16.0 / 9.0;
+    private const double Arma3ExpectedAspectRatio = 0; // Compare each member against the host; do not force 16:9.
 
     /// <summary>
     /// Idle → Countdown → Starting (odx record warming up) → Recording → Stopping (incl. build + validate) → Idle.
