@@ -34,3 +34,42 @@ jobs:
         run: |
           dotnet test OdxCapture.sln -c Release --no-build --logger "console;verbosity=normal"
           if ($LASTEXITCODE -ne 0) { throw 'ODX regression tests failed' }
+      - name: Build ODX HUD native extension
+        shell: pwsh
+        run: |
+          cmake -S capture/native/arma3-hud/extension -B build/odx-hud -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'ODX HUD extension CMake configure failed' }
+          cmake --build build/odx-hud --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'ODX HUD extension build failed' }
+      - name: Setup HEMTT
+        uses: arma-actions/hemtt@v1
+      - name: Build ODX HUD addon PBO
+        working-directory: capture/native/arma3-hud
+        shell: pwsh
+        run: |
+          hemtt release
+          if ($LASTEXITCODE -ne 0) { throw 'HEMTT addon build failed' }
+      - name: Assemble @ODX_HUD test mod
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pbo = Get-ChildItem capture/native/arma3-hud/.hemttout -Filter 'odx_hud.pbo' -Recurse -File | Select-Object -First 1
+          if ($null -eq $pbo) { throw 'HEMTT did not produce odx_hud.pbo' }
+          $dll = Get-ChildItem build/odx-hud -Filter 'ODX_HUD_x64.dll' -Recurse -File | Select-Object -First 1
+          if ($null -eq $dll) { throw 'CMake did not produce ODX_HUD_x64.dll' }
+          $mod = Join-Path $PWD 'staging/mods/@ODX_HUD'
+          New-Item -ItemType Directory -Force (Join-Path $mod 'addons') | Out-Null
+          Copy-Item $pbo.FullName (Join-Path $mod 'addons/odx_hud.pbo') -Force
+          Copy-Item 'capture/native/arma3-hud/mod.cpp' (Join-Path $mod 'mod.cpp') -Force
+          Copy-Item $dll.FullName (Join-Path $mod 'ODX_HUD_x64.dll') -Force
+          if (-not (Test-Path (Join-Path $mod 'addons/odx_hud.pbo')) -or
+              -not (Test-Path (Join-Path $mod 'ODX_HUD_x64.dll'))) {
+            throw '@ODX_HUD staging verification failed'
+          }
+          Get-ChildItem $mod -Recurse | Select-Object FullName,Length
+      - name: Upload ODX HUD test mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: odx-hud-bridge-0.3.4-test
+          path: staging/mods/@ODX_HUD
+          if-no-files-found: error
