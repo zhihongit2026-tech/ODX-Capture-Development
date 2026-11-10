@@ -19,6 +19,7 @@ public sealed record Arma3TeamStatus(
     string DifficultySignature,
     string ModsHash,
     int CaptureFps,
+    int TargetCaptureFps,
     long DroppedFrames,
     long StarvedFrames,
     string Health,
