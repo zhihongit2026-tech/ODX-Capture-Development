@@ -452,9 +452,34 @@ public partial class MainWindow : Window
         _overlay = null;
     }
 
-    private void StartRecording()
+    private async void StartRecording()
     {
         SaveSettings();
+        bool arma3 = IsArma3Selected;
+        if (arma3)
+        {
+            var preflight = await _arma3Hud.RequestPreflightAsync(TimeSpan.FromSeconds(8));
+            if (preflight is null || preflight.MissionBlocksHud)
+            {
+                SetState(RunState.Idle, _ => preflight is null
+                    ? "Không nhận được @ODX_HUD. Hãy bật addon và vào mission Arma 3."
+                    : "Mission khóa showHUD; ODX không thể ẩn HUD an toàn.");
+                return;
+            }
+            if (!await _arma3Hud.HideAsync(TimeSpan.FromSeconds(6)))
+            {
+                SetState(RunState.Idle, _ => "Không xác nhận được HUD đã ẩn; chưa bắt đầu ghi hình.");
+                return;
+            }
+            var hidden = await _arma3Hud.RequestPreflightAsync(TimeSpan.FromSeconds(6));
+            if (hidden is null || !hidden.HudHidden)
+            {
+                await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(3));
+                SetState(RunState.Idle, _ => "HUD chưa được xác minh đã ẩn; chưa bắt đầu ghi hình.");
+                return;
+            }
+        }
+
         CaptureRun run;
         try
         {
@@ -463,6 +488,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (arma3) await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(4));
             string error = ex.Message;
             SetState(RunState.Idle, t => t.CouldNotStart(error));
             return;
@@ -479,8 +505,12 @@ public partial class MainWindow : Window
             _clock.Start();
             ShowRecordingStatus();
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
-        // Shown only once the capture has ended, so the badge never ends up in the video.
-        run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
+        // Restore the HUD as soon as capture stops, before video finalization; no monitoring UI is drawn into the game.
+        _ = run.CaptureStopped.ContinueWith(async _ =>
+        {
+            if (arma3) await _arma3Hud.RestoreAsync(TimeSpan.FromSeconds(5));
+            await Dispatcher.InvokeAsync(() => ShowProcessingBadge(run));
+        }, TaskScheduler.Default).Unwrap();
         run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));
         run.Completion.ContinueWith(t => Dispatcher.Invoke(() => OnRunCompleted(t.Result)),
             TaskContinuationOptions.OnlyOnRanToCompletion);
