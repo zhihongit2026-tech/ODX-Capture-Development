@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -852,7 +853,7 @@ public partial class MainWindow : Window
             .Select(m => (Member: m, Parsed: Arma3TeamStatus.TryParseRoomProblem(m.Problem, out var status) ? status : null))
             .ToList();
         var hostTelemetry = teamStatuses.FirstOrDefault(x => x.Member.PlayerId == room.HostPlayerId).Parsed;
-        string members = string.Join(" · ", teamStatuses.Select(x => FormatTeamMember(x.Member, x.Parsed, hostTelemetry)));
+        string members = string.Join(" · ", teamStatuses.Select(x => FormatTeamMember(x.Member, x.Parsed, hostTelemetry, x.Member.PlayerId == room.HostPlayerId)));
         var lan = session.Lan;
         bool? packets = session.Packets;
         var round = _roundResult;
@@ -878,7 +879,7 @@ public partial class MainWindow : Window
 
     private bool IsArma3WindowSelected()
     {
-        string? process = (SourceBox.SelectedItem as SourceItem)?.Process ?? _settings.WindowProcess;
+        string? process = SourceBox.SelectedItem is SourceItem source ? source.Process : _settings.WindowProcess;
         return string.Equals(process, "arma3_x64", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -932,9 +933,8 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private static string FormatTeamMember(RoomMember member, Arma3TeamStatus? status, Arma3TeamStatus? hostTelemetry)
+    private static string FormatTeamMember(RoomMember member, Arma3TeamStatus? status, Arma3TeamStatus? hostTelemetry, bool isHost)
     {
-        bool isHost = member.PlayerId == member.PlayerId && member.State is not null; // keeps the member formatting side-effect free
         string label = member.Name + (member.Ready ? " ✓" : "");
         if (member.State.StartsWith("mismatch|", StringComparison.Ordinal))
             label += " ⚠ " + member.State["mismatch|".Length..].Replace('|', ',');
@@ -976,7 +976,8 @@ public partial class MainWindow : Window
 
     private async Task UpdateTeamTelemetryAsync()
     {
-        if (_teamMonitorBusy || _room is null || _agent?.GameTitle != "Arma 3" || _run is null) return;
+        var agent = _agent;
+        if (_teamMonitorBusy || _room is null || agent?.GameTitle != "Arma 3" || _run is null) return;
         _teamMonitorBusy = true;
         try
         {
@@ -984,7 +985,7 @@ public partial class MainWindow : Window
             var issues = new List<string>();
             string health = "OK";
             DateTime now = DateTime.UtcNow;
-            int targetFps = _agent.ArmedFps ?? _settings.Fps;
+            int targetFps = agent.ArmedFps ?? _settings.Fps;
             if (telemetry is null || now - telemetry.ReceivedUtc > TimeSpan.FromSeconds(3))
             {
                 issues.Add("Arma 3 HUD/FPS telemetry stale");
@@ -1038,8 +1039,8 @@ public partial class MainWindow : Window
                 health = "CRITICAL";
             }
 
-            int width = _agent.Capture?.Width ?? telemetry?.Width ?? 0;
-            int height = _agent.Capture?.Height ?? telemetry?.Height ?? 0;
+            int width = agent.Capture?.Width ?? telemetry?.Width ?? 0;
+            int height = agent.Capture?.Height ?? telemetry?.Height ?? 0;
             double aspect = width > 0 && height > 0 ? (double)width / height : telemetry?.AspectRatio ?? 0;
             var status = new Arma3TeamStatus(
                 telemetry?.AddonVersion ?? "missing",
@@ -1052,13 +1053,13 @@ public partial class MainWindow : Window
                 telemetry?.MissionOverride ?? false,
                 telemetry?.DifficultySignature ?? "unknown",
                 telemetry?.ModsHash ?? "unknown",
-                _agent.ArmedFps ?? _settings.Fps,
+                agent.ArmedFps ?? _settings.Fps,
                 recorder?.Dropped ?? 0,
                 recorder?.Starved ?? 0,
                 health,
                 issues.ToArray(),
                 now);
-            await _agent.ReportTeamStatusAsync(status, CancellationToken.None);
+            await agent.ReportTeamStatusAsync(status, CancellationToken.None);
         }
         catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or InvalidOperationException or ObjectDisposedException)
         {
