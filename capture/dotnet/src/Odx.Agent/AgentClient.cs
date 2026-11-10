@@ -121,6 +121,13 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     public RoomUpdate? Room { get; private set; }
 
     public bool IsHost => Room?.HostPlayerId == options.PlayerId;
+    public bool IsConnected => _socket is { State: WebSocketState.Open };
+
+    /// <summary>Called before a Room countdown/capture. Arma 3 uses this to request HUD hidden and await addon acknowledgement.</summary>
+    public Func<string, CancellationToken, Task<bool>>? BeforeCaptureStartAsync { get; set; }
+
+    /// <summary>Called as soon as the recorder stops, before video finalization, to restore the Arma 3 HUD.</summary>
+    public Func<string, CancellationToken, Task>? AfterCaptureStoppedAsync { get; set; }
 
     /// <summary>The capture in progress (odx-app shows its counters); null between sessions.</summary>
     public ICaptureRun? CurrentRun => _run;
@@ -317,6 +324,18 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <param name="sessionId">The host's name for the round (its folder); null lets the orchestrator name it.</param>
     public Task ToggleRoundAsync(int countdownMs, CancellationToken stop, string? sessionId = null) =>
         SendAsync(new ToggleRound(countdownMs, sessionId), stop);
+
+    public Task SetTeamStandardAsync(int recordingFps, CancellationToken stop) =>
+        SendAsync(new SetTeamStandard(recordingFps), stop);
+
+    public Task ReportPreflightAsync(TeamPreflightSnapshot snapshot, CancellationToken stop) =>
+        SendAsync(new TeamPreflight(snapshot), stop);
+
+    public Task ReportPerformanceAsync(PerformanceTelemetry telemetry, CancellationToken stop) =>
+        SendAsync(new PerformanceTelemetry(telemetry.GameFps, telemetry.GameFpsMin, telemetry.RecordingFps,
+            telemetry.Frames, telemetry.Duplicates, telemetry.Starved, telemetry.CpuUsagePercent, telemetry.GpuUsagePercent,
+            telemetry.EncoderHealthy, telemetry.CaptureSourceHealthy, telemetry.AudioHealthy, telemetry.GameRunning,
+            telemetry.HudHidden, telemetry.SampledAtUtcMs), stop);
 
     public async Task LeaveRoomAsync(CancellationToken stop)
     {
@@ -541,20 +560,38 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
+
+        if (BeforeCaptureStartAsync is { } beforeHud)
+        {
+            bool ready;
+            try { ready = await beforeHud(s.SessionId, stopped); }
+            catch (Exception e)
+            {
+                await EndWithoutCaptureAsync(s.SessionId, $"HUD preflight failed: {e.Message}", stop);
+                return;
+            }
+            if (!ready)
+            {
+                await EndWithoutCaptureAsync(s.SessionId, "HUD was not confirmed hidden; round not recorded", stop);
+                return;
+            }
+        }
+        if (stopped.IsCancellationRequested)
+        {
+            if (AfterCaptureStoppedAsync is { } restoreCancelled)
+                try { await restoreCancelled(s.SessionId, stop); } catch (Exception e) { Log?.Invoke($"HUD restore: {e.Message}"); }
+            await EndWithoutCaptureAsync(s.SessionId, "round cancelled before capture started", stop, cancelled: true);
+            return;
+        }
+
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
         string folder = Path.Combine(options.OutputRoot, s.SessionId);
-        if (Directory.Exists(folder))
+        if (Directory.Exists(folder) && ArchivePreviousTake(folder, s.SessionId) is null)
         {
-            // A task id typed again is a new take of that round: the earlier one goes, the new one takes its name.
-            try
-            {
-                Directory.Delete(folder, recursive: true);
-                Log?.Invoke($"{s.SessionId}: the earlier take deleted");
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                Log?.Invoke($"{s.SessionId}: cannot delete the earlier take {folder}: {e.Message}");
-            }
+            if (AfterCaptureStoppedAsync is { } restoreArchive)
+                try { await restoreArchive(s.SessionId, stop); } catch (Exception e) { Log?.Invoke($"HUD restore: {e.Message}"); }
+            await EndWithoutCaptureAsync(s.SessionId, "cannot preserve previous Task folder; recording blocked to prevent overwrite", stop);
+            return;
         }
         string? etl = await StartPacketsAsync(s.SessionId, stop);
         ICaptureRun run;
@@ -567,6 +604,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         catch (Exception e)
         {
             if (etl is not null) await StopPacketsAsync(etl, null, stop);
+            if (AfterCaptureStoppedAsync is { } restoreStartFailure)
+                try { await restoreStartFailure(s.SessionId, stop); } catch (Exception restoreError) { Log?.Invoke($"HUD restore: {restoreError.Message}"); }
             await EndWithoutCaptureAsync(s.SessionId, e.Message, stop);
             return;
         }
@@ -597,6 +636,13 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             }
         }
 
+        try { await run.CaptureStopped; }
+        finally
+        {
+            if (AfterCaptureStoppedAsync is { } restoreHud)
+                try { await restoreHud(s.SessionId, stop); }
+                catch (Exception e) { Log?.Invoke($"HUD restore: {e.Message}"); }
+        }
         var result = await run.Completion;
         if (etl is not null) await StopPacketsAsync(etl, result.SessionDir, stop);
         if (Volatile.Read(ref _stopReason) == Stop.Cancelled)
@@ -624,6 +670,30 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             _run = null;
             _runSessionId = null;
+        }
+    }
+
+    /// <summary>Moves an earlier take out of the active Task folder. Failure blocks the new recording; no prior video is deleted.</summary>
+    private string? ArchivePreviousTake(string folder, string taskId)
+    {
+        try
+        {
+            string archiveRoot = Path.Combine(options.OutputRoot, "_previous_takes");
+            Directory.CreateDirectory(archiveRoot);
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff", System.Globalization.CultureInfo.InvariantCulture);
+            string destination = Path.Combine(archiveRoot, taskId + "__" + stamp);
+            int suffix = 1;
+            while (Directory.Exists(destination) || File.Exists(destination))
+                destination = Path.Combine(archiveRoot, taskId + "__" + stamp + "-" +
+                    (suffix++).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Directory.Move(folder, destination);
+            Log?.Invoke($"{taskId}: previous take preserved in {destination}");
+            return destination;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Log?.Invoke($"{taskId}: cannot preserve previous take: {e.Message}");
+            return null;
         }
     }
 
