@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Odx.Protocol;
 
 namespace Odx.App;
 
@@ -45,49 +46,6 @@ public sealed record Arma3Telemetry(
 public sealed record Arma3PreflightResult(bool Success, Arma3Telemetry? Telemetry, IReadOnlyList<string> Issues)
 {
     public string Summary => Issues.Count == 0 ? "Arma 3 preflight PASS" : string.Join("; ", Issues);
-}
-
-public sealed record Arma3TeamStatus(
-    string AddonVersion,
-    double GameFps,
-    double GameFpsMin,
-    int Width,
-    int Height,
-    double AspectRatio,
-    bool HudHidden,
-    bool MissionOverride,
-    string DifficultySignature,
-    string ModsHash,
-    int CaptureFps,
-    long DroppedFrames,
-    long StarvedFrames,
-    string Health,
-    string[] Issues,
-    DateTime CapturedUtc)
-{
-    private const string Prefix = "ODXTEAM:";
-
-    public string ToRoomProblem()
-    {
-        var json = JsonSerializer.SerializeToUtf8Bytes(this);
-        return Prefix + Convert.ToBase64String(json);
-    }
-
-    public static bool TryParseRoomProblem(string? value, out Arma3TeamStatus? status)
-    {
-        status = null;
-        if (value is null || !value.StartsWith(Prefix, StringComparison.Ordinal)) return false;
-        try
-        {
-            var bytes = Convert.FromBase64String(value[Prefix.Length..]);
-            status = JsonSerializer.Deserialize<Arma3TeamStatus>(bytes);
-            return status is not null;
-        }
-        catch (Exception e) when (e is FormatException or JsonException)
-        {
-            return false;
-        }
-    }
 }
 
 /// <summary>
