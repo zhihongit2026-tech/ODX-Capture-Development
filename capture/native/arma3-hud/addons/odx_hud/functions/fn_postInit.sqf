@@ -15,28 +15,8 @@ missionNamespace setVariable ["ODX_HUD_Initialized", true];
     private _lastBridgeError = 0;
 
     private _makeSnapshot = {
-        private _difficulty = [
-            ["reducedDamage", difficultyOption "reducedDamage"],
-            ["groupIndicators", difficultyOption "groupIndicators"],
-            ["friendlyTags", difficultyOption "friendlyTags"],
-            ["enemyTags", difficultyOption "enemyTags"],
-            ["detectedMines", difficultyOption "detectedMines"],
-            ["commands", difficultyOption "commands"],
-            ["waypoints", difficultyOption "waypoints"],
-            ["weaponInfo", difficultyOption "weaponInfo"],
-            ["stanceIndicator", difficultyOption "stanceIndicator"],
-            ["staminaBar", difficultyOption "staminaBar"],
-            ["weaponCrosshair", difficultyOption "weaponCrosshair"],
-            ["visionAid", difficultyOption "visionAid"],
-            ["thirdPersonView", difficultyOption "thirdPersonView"],
-            ["cameraShake", difficultyOption "cameraShake"],
-            ["scoreTable", difficultyOption "scoreTable"],
-            ["deathMessages", difficultyOption "deathMessages"],
-            ["vonID", difficultyOption "vonID"],
-            ["mapContent", difficultyOption "mapContent"],
-            ["autoReport", difficultyOption "autoReport"],
-            ["multipleSaves", difficultyOption "multipleSaves"]
-        ];
+        // Arma 3 2.14+ returns every current difficulty option/value pair, including tacticalPing.
+        private _difficulty = difficultyOption [];
 
         private _video = getVideoOptions;
         private _videoKeys = keys _video;
@@ -56,7 +36,7 @@ missionNamespace setVariable ["ODX_HUD_Initialized", true];
             ["settingsFingerprint", str [_difficulty, _videoSettings]],
             ["screenWidth", _resolution select 0],
             ["screenHeight", _resolution select 1],
-            ["aspectRatio", _resolution select 4],
+            ["aspectRatio", (_resolution select 0) / (_resolution select 1)],
             ["hudBridgeVersion", "0.3.4"],
             ["hudBridgeReady", true],
             ["hudHidden", _hudHidden],
