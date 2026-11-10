@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -178,14 +179,11 @@ public sealed class Arma3HudBridge : IAsyncDisposable
                     var telemetry = JsonSerializer.Deserialize<Arma3TelemetryWire>(payload, JsonOptions);
                     if (telemetry is not null)
                     {
-                        TaskCompletionSource<bool>? waiter;
                         lock (_gate)
                         {
                             _lastTelemetry = telemetry;
                             _lastSeenUtc = DateTime.UtcNow;
-                            waiter = _hudWaiter;
                         }
-                        if (waiter is not null) waiter.TrySetResult(telemetry.HudHidden);
                         TelemetryChanged?.Invoke(telemetry);
                     }
                     return _commands.TryDequeue(out string? command) ? command : "NONE";
