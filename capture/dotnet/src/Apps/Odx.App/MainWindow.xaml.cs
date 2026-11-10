@@ -941,7 +941,8 @@ public partial class MainWindow : Window
         new(telemetry.AddonVersion, telemetry.GameFps, telemetry.GameFpsMin,
             telemetry.Width, telemetry.Height, telemetry.AspectRatio,
             HudHidden: false, telemetry.MissionOverride, telemetry.DifficultySignature, telemetry.ModsHash,
-            CaptureFps: 0, DroppedFrames: 0, StarvedFrames: 0, Health: "READY", Issues: [], DateTime.UtcNow);
+            CaptureFps: 0, TargetCaptureFps: 0, DroppedFrames: 0, StarvedFrames: 0,
+            Health: "READY", Issues: [], DateTime.UtcNow);
 
     private static List<string> CompareArma3Configuration(Arma3TeamStatus reference, Arma3TeamStatus candidate)
     {
@@ -983,14 +984,17 @@ public partial class MainWindow : Window
                 issues.Add("Aspect ratio mismatch");
             if (!string.Equals(status.DifficultySignature, hostTelemetry.DifficultySignature, StringComparison.Ordinal))
                 issues.Add("Difficulty mismatch");
-            if (status.CaptureFps > 0 && hostTelemetry.CaptureFps > 0 && status.CaptureFps != hostTelemetry.CaptureFps)
-                issues.Add("Capture FPS mismatch");
+            if (status.TargetCaptureFps > 0 && hostTelemetry.TargetCaptureFps > 0 &&
+                status.TargetCaptureFps != hostTelemetry.TargetCaptureFps)
+                issues.Add("Target capture FPS mismatch");
         }
 
         if (status.Health == "OK" && !status.HudHidden) issues.Add("HUD visible");
         if (status.MissionOverride) issues.Add("mission overrides showHUD");
         string ratio = status.AspectRatio > 0 ? $"{status.AspectRatio:0.00}:1" : "ratio unknown";
-        string captureFps = status.CaptureFps > 0 ? $"{status.CaptureFps} capture FPS" : "capture FPS set by Room server";
+        string captureFps = status.TargetCaptureFps > 0
+            ? $"{status.CaptureFps:0}/{status.TargetCaptureFps} capture FPS"
+            : "capture FPS set by Room server";
         string hud = status.Health == "READY" ? "HUD will hide at countdown" : status.HudHidden ? "HUD OFF" : "HUD ON";
         string summary = $"{status.GameFps:0} game FPS · {captureFps} · {ratio} · {hud}";
         if (issues.Count > 0 || status.Health is "WARNING" or "CRITICAL")
@@ -1079,6 +1083,7 @@ public partial class MainWindow : Window
                 telemetry?.MissionOverride ?? false,
                 telemetry?.DifficultySignature ?? "unknown",
                 telemetry?.ModsHash ?? "unknown",
+                recorder is { Fps: > 0 } ? (int)Math.Round(recorder.Fps) : 0,
                 agent.ArmedFps ?? _settings.Fps,
                 recorder?.Dropped ?? 0,
                 recorder?.Starved ?? 0,
