@@ -1,0 +1,15 @@
+name = "ODX HUD Bridge"
+prefix = "odx"
+mainprefix = "z"
+
+[version]
+major = 0
+minor = 3
+patch = 4
+git_hash = 0
+
+[files]
+include = [
+    "mod.cpp",
+    "README.md",
+]
