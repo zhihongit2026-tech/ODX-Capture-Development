@@ -82,7 +82,7 @@ public sealed class Arma3HudBridge : IDisposable
     public Arma3Telemetry? Latest => Volatile.Read(ref _latest);
 
     public async Task<Arma3PreflightResult> CheckPreflightAsync(
-        double expectedAspectRatio,
+        double? expectedAspectRatio,
         CancellationToken cancellationToken = default)
     {
         var issues = new List<string>();
