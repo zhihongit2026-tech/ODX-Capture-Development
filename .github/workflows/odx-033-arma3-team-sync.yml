@@ -1,0 +1,71 @@
+name: ODX 0.3.3 Arma 3 Team Sync Windows x64 candidate
+
+on:
+  push:
+    branches:
+      - feature/arma3-team-sync-hud-monitor
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install video test tools
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Build and test .NET solution
+        working-directory: capture/dotnet
+        shell: pwsh
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet build failed' }
+          dotnet test OdxCapture.sln -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet test failed' }
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+
+      - uses: actions/cache@v4
+        with:
+          path: capture/dotnet/.cache/ffmpeg-*
+          key: odx-033-arma3-ffmpeg-${{ hashFiles('capture/dotnet/ffmpeg/build-ffmpeg.sh') }}
+
+      - name: Build Windows x64 package and @ODX_HUD addon
+        working-directory: capture/dotnet
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./publish.ps1 -Version 0.3.3.1
+          if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
+          if (-not (Test-Path 'dist/odx-capture-0.3.3.1-win-x64/@ODX_HUD/addons/ODX_HUD.pbo')) {
+            throw '@ODX_HUD PBO is missing from the Windows package'
+          }
+          if (-not (Test-Path 'dist/odx-capture-0.3.3.1-win-x64.zip')) {
+            throw 'Windows x64 ZIP is missing'
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: odx-capture-0.3.3.1-arma3-team-sync-win-x64-candidate
+          path: capture/dotnet/dist/odx-capture-0.3.3.1-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14
