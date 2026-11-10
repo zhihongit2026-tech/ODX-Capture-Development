@@ -74,9 +74,6 @@ missionNamespace setVariable ["ODX_HUD_Initialized", true];
         private _telemetry = createHashMapFromArray [
             ["gameFps", diag_fps],
             ["gameFpsMin", diag_fpsMin],
-            ["hudHidden", _hudHidden],
-            ["gameRunning", true],
-            ["missionBlocksHud", _missionBlocksHud],
             ["sampledAtUtcMs", (diag_tickTime * 1000)]
         ];
 
