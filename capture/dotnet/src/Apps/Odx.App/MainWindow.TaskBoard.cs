@@ -318,6 +318,11 @@ public partial class MainWindow
     private void TaskList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_taskRebinding || TaskListBox.SelectedItem is not TaskBoardEntry entry) return;
+        if (entry.IsRecorded)
+        {
+            TaskListBox.SelectedItem = null;
+            return;
+        }
         ChooseTask(entry);
     }
 
@@ -518,7 +523,7 @@ public partial class MainWindow
             string archive = Path.Combine(archiveRoot, taskId + "__" + stamp);
             int suffix = 1;
             while (Directory.Exists(archive))
-                archive = Path.Combine(archiveRoot, taskId + "__" + stamp + "-" + suffix++.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                archive = Path.Combine(archiveRoot, taskId + "__" + stamp + "-" + (suffix++).ToString(System.Globalization.CultureInfo.InvariantCulture));
             // Move the previous take out of the active Task folder before recording.
             // If the move fails, abort instead of risking an overwrite.
             Directory.Move(folder, archive);
