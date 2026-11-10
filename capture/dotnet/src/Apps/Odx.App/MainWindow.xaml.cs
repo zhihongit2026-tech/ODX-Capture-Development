@@ -903,6 +903,10 @@ public partial class MainWindow : Window
     {
         if (!string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase)) return true;
 
+        var probe = await agent.CheckCaptureAsync();
+        if (probe is null || !probe.Ok || !probe.Source.StartsWith("window:arma3_x64", StringComparison.OrdinalIgnoreCase))
+            return await CancelArma3RoomRoundAsync(agent, probe is null ? "Arma 3 window capture probe unavailable" : $"capture source must be window:arma3_x64 (current: {probe.Source})");
+
         var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio, cancellationToken);
         if (!preflight.Success)
             return await CancelArma3RoomRoundAsync(agent, preflight.Summary);
@@ -977,7 +981,7 @@ public partial class MainWindow : Window
     private async Task UpdateTeamTelemetryAsync()
     {
         var agent = _agent;
-        if (_teamMonitorBusy || _room is null || agent?.GameTitle != "Arma 3" || _run is null) return;
+        if (_teamMonitorBusy || _room is null || agent is null || agent.GameTitle != "Arma 3" || _run is null) return;
         _teamMonitorBusy = true;
         try
         {
@@ -1089,7 +1093,7 @@ public partial class MainWindow : Window
     {
         if (_room is not { } room) return;
         var agent = room.Agent;
-        if (string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase))
+        if (!agent.IsReady && string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase))
         {
             var probe = await agent.CheckCaptureAsync();
             if (probe is null || !probe.Ok || !probe.Source.StartsWith("window:arma3_x64", StringComparison.OrdinalIgnoreCase))
