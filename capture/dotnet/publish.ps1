@@ -75,6 +75,7 @@ python $packPbo $addonSource $pbo
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pbo)) { throw 'building @ODX_HUD\\addons\\ODX_HUD.pbo failed' }
 Copy-Item (Join-Path $root '..\arma3\README.txt') (Join-Path $arma3Mod 'README.txt')
 Copy-Item (Join-Path $root '..\arma3\README.txt') (Join-Path $out 'ODX_ARMA3_TEAM_SYNC_README.txt')
+Copy-Item (Join-Path $root '..\deploy\UPGRADE_ROOM_SERVER_0331.md') (Join-Path $out 'ODX_ROOM_SERVER_UPDATE.md')
 
 $configPath = Join-Path $bin 'odx-capture.json'
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -138,7 +139,8 @@ if (Test-Path $packageZip) { Remove-Item -Force $packageZip }
 $zip = [IO.Compression.ZipFile]::Open($packageZip, [IO.Compression.ZipArchiveMode]::Create)
 try {
     $packageFiles = @((Get-Item $launcherExe), (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.ps1')),
-        (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')), (Get-Item (Join-Path $out 'ODX_ARMA3_TEAM_SYNC_README.txt'))) +
+        (Get-Item (Join-Path $out 'RESTORE_ROOM_FROM_032.cmd')), (Get-Item (Join-Path $out 'ODX_ARMA3_TEAM_SYNC_README.txt')),
+        (Get-Item (Join-Path $out 'ODX_ROOM_SERVER_UPDATE.md'))) +
         @(Get-ChildItem $bin -Recurse -File) + @(Get-ChildItem $arma3Mod -Recurse -File)
     foreach ($file in $packageFiles) {
         $entry = "$name/" + $file.FullName.Substring($out.Length + 1).Replace('\', '/')
