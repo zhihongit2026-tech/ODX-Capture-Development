@@ -869,6 +869,207 @@ public partial class MainWindow : Window
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));
     }
 
+    private bool IsArma3SoloSelected()
+    {
+        if (GameBox.SelectedItem is not GameItem { Path: { Length: > 0 } profilePath }) return false;
+        try { return GameProfile.Load(profilePath).GameTitle.Equals("Arma 3", StringComparison.OrdinalIgnoreCase); }
+        catch (Exception e) when (e is IOException or JsonException or FormatException) { return false; }
+    }
+
+    private bool IsArma3WindowSelected()
+    {
+        string? process = (SourceBox.SelectedItem as SourceItem)?.Process ?? _settings.WindowProcess;
+        return string.Equals(process, "arma3_x64", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task RestoreArma3HudAsync()
+    {
+        if (!_hudHiddenForCapture) return;
+        _hudHiddenForCapture = false;
+        try
+        {
+            var result = await _arma3Hud.SetHudHiddenAsync(false);
+            if (!result.Success)
+                SetStatus(_ => "ODX could not restore Arma 3 HUD: " + result.Summary);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            SetStatus(_ => "ODX could not restore Arma 3 HUD: " + e.Message);
+        }
+    }
+
+    private async Task<bool> PrepareArma3RoomCaptureAsync(AgentClient agent, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(agent.GameTitle, "Arma 3", StringComparison.OrdinalIgnoreCase)) return true;
+
+        var preflight = await _arma3Hud.CheckPreflightAsync(Arma3ExpectedAspectRatio, cancellationToken);
+        if (!preflight.Success)
+            return await CancelArma3RoomRoundAsync(agent, preflight.Summary);
+
+        var hidden = await _arma3Hud.SetHudHiddenAsync(true, cancellationToken);
+        if (!hidden.Success)
+            return await CancelArma3RoomRoundAsync(agent, hidden.Summary);
+
+        _hudHiddenForCapture = true;
+        return true;
+    }
+
+    private async Task<bool> CancelArma3RoomRoundAsync(AgentClient agent, string reason)
+    {
+        try
+        {
+            await agent.ReportStateAsync("mismatch|hud-or-preflight", reason, null, CancellationToken.None);
+            if (agent.IsHost)
+                await agent.ToggleRoundAsync(0, CancellationToken.None);
+            else
+                await agent.SetReadyAsync(false, CancellationToken.None);
+        }
+        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException or InvalidOperationException)
+        {
+            reason += "; could not cancel room countdown: " + e.Message;
+        }
+        SetStatus(_ => "Arma 3 room start cancelled: " + reason);
+        return false;
+    }
+
+    private static string FormatTeamMember(RoomMember member, Arma3TeamStatus? status, Arma3TeamStatus? hostTelemetry)
+    {
+        bool isHost = member.PlayerId == member.PlayerId && member.State is not null; // keeps the member formatting side-effect free
+        string label = member.Name + (member.Ready ? " ✓" : "");
+        if (member.State.StartsWith("mismatch|", StringComparison.Ordinal))
+            label += " ⚠ " + member.State["mismatch|".Length..].Replace('|', ',');
+        else
+            label += " " + member.State;
+
+        if (status is null)
+        {
+            if (member.Problem is { Length: > 0 } problem && !Arma3TeamStatus.TryParseRoomProblem(problem, out _))
+                label += " ⚠ " + problem;
+            else
+                label += " · Team telemetry pending";
+            return label;
+        }
+
+        var issues = status.Issues.ToList();
+        if (!isHost && hostTelemetry is not null)
+        {
+            if (!string.Equals(status.ModsHash, hostTelemetry.ModsHash, StringComparison.Ordinal))
+                issues.Add("Mods mismatch");
+            if (Math.Abs(status.AspectRatio - hostTelemetry.AspectRatio) > 0.015)
+                issues.Add("Aspect ratio mismatch");
+            if (!string.Equals(status.DifficultySignature, hostTelemetry.DifficultySignature, StringComparison.Ordinal))
+                issues.Add("Difficulty mismatch");
+            if (status.CaptureFps != hostTelemetry.CaptureFps)
+                issues.Add("Capture FPS mismatch");
+        }
+
+        if (!status.HudHidden) issues.Add("HUD visible");
+        if (status.MissionOverride) issues.Add("mission overrides showHUD");
+        string ratio = status.AspectRatio > 0 ? $"{status.AspectRatio:0.00}:1" : "ratio unknown";
+        string summary = $"{status.GameFps:0} game FPS · {status.CaptureFps} capture FPS · {ratio} · HUD {(status.HudHidden ? "OFF" : "ON")}";
+        if (issues.Count > 0 || status.Health != "OK")
+            label += " · " + summary + " ⚠ " + string.Join(", ", issues.Distinct());
+        else
+            label += " · " + summary + " · OK";
+        return label;
+    }
+
+    private async Task UpdateTeamTelemetryAsync()
+    {
+        if (_teamMonitorBusy || _room is null || _agent?.GameTitle != "Arma 3" || _run is null) return;
+        _teamMonitorBusy = true;
+        try
+        {
+            var telemetry = _arma3Hud.Latest;
+            var issues = new List<string>();
+            string health = "OK";
+            DateTime now = DateTime.UtcNow;
+            int targetFps = _agent.ArmedFps ?? _settings.Fps;
+            if (telemetry is null || now - telemetry.ReceivedUtc > TimeSpan.FromSeconds(3))
+            {
+                issues.Add("Arma 3 HUD/FPS telemetry stale");
+                health = "CRITICAL";
+                _gameFpsLowSince = null;
+                _gameFpsCriticalSince = null;
+            }
+            else
+            {
+                if (telemetry.MissionOverride) issues.Add("mission showHUD[] override");
+                if (!telemetry.FullHudHidden) issues.Add("Full HUD Hide not confirmed");
+                if (!telemetry.DifficultyMatchesGuide) issues.Add("Difficulty/Tactical Ping mismatch");
+
+                if (telemetry.GameFps < targetFps * 0.60)
+                {
+                    _gameFpsCriticalSince ??= now;
+                    if (now - _gameFpsCriticalSince >= TimeSpan.FromSeconds(3))
+                    {
+                        issues.Add($"game FPS critical: {telemetry.GameFps:0.0}/{targetFps}");
+                        health = "CRITICAL";
+                    }
+                }
+                else _gameFpsCriticalSince = null;
+
+                if (telemetry.GameFps < targetFps * 0.80)
+                {
+                    _gameFpsLowSince ??= now;
+                    if (now - _gameFpsLowSince >= TimeSpan.FromSeconds(5))
+                    {
+                        issues.Add($"game FPS low: {telemetry.GameFps:0.0}/{targetFps}");
+                        if (health != "CRITICAL") health = "WARNING";
+                    }
+                }
+                else _gameFpsLowSince = null;
+            }
+
+            var recorder = _run.LastStatus;
+            if (recorder is { Starved: > 0 })
+            {
+                issues.Add($"encoder starved {recorder.Starved} frames");
+                health = "CRITICAL";
+            }
+            else if (recorder is { Dropped: > 0 })
+            {
+                issues.Add($"capture dropped {recorder.Dropped} frames");
+                if (health != "CRITICAL") health = "WARNING";
+            }
+            if (_run.Problem is { Length: > 0 } captureProblem)
+            {
+                issues.Add("capture: " + captureProblem);
+                health = "CRITICAL";
+            }
+
+            int width = _agent.Capture?.Width ?? telemetry?.Width ?? 0;
+            int height = _agent.Capture?.Height ?? telemetry?.Height ?? 0;
+            double aspect = width > 0 && height > 0 ? (double)width / height : telemetry?.AspectRatio ?? 0;
+            var status = new Arma3TeamStatus(
+                telemetry?.AddonVersion ?? "missing",
+                telemetry?.GameFps ?? 0,
+                telemetry?.GameFpsMin ?? 0,
+                width,
+                height,
+                aspect,
+                telemetry?.FullHudHidden ?? false,
+                telemetry?.MissionOverride ?? false,
+                telemetry?.DifficultySignature ?? "unknown",
+                telemetry?.ModsHash ?? "unknown",
+                _agent.ArmedFps ?? _settings.Fps,
+                recorder?.Dropped ?? 0,
+                recorder?.Starved ?? 0,
+                health,
+                issues.ToArray(),
+                now);
+            await _agent.ReportTeamStatusAsync(status, CancellationToken.None);
+        }
+        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or InvalidOperationException or ObjectDisposedException)
+        {
+            // Room reconnect and capture shutdown are handled by AgentClient; the next tick retries.
+        }
+        finally
+        {
+            _teamMonitorBusy = false;
+        }
+    }
+
     private bool _syncingClock;
 
     /// <summary>Sets the Windows clock from NTP (UAC prompt), then measures again; the status line shows the outcome.</summary>
