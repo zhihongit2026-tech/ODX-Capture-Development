@@ -1,0 +1,9 @@
+name = "ODX HUD Bridge";
+picture = "";
+logo = "";
+logoOver = "";
+tooltip = "ODX HUD Bridge";
+tooltipOwned = "ODX HUD Bridge";
+overview = "Client-side bridge for ODX Capture Team 4. Allows ODX to hide and restore standard Arma 3 HUD and report preflight/performance telemetry.";
+author = "ODX";
+overviewPicture = "";
