@@ -126,9 +126,9 @@ public partial class MainWindow
             if (await PrepareArma3PreflightAsync(fps))
                 ShowAgentStatus();
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            TeamPreflightStatus.Text = "Không thể áp dụng Team Standard: " + e.Message;
+            TeamPreflightStatus.Text = "Không thể áp dụng Team Standard: " + ex.Message;
         }
         finally
         {
@@ -232,13 +232,15 @@ public partial class MainWindow
         double? cpu = SampleArmaCpuPercent();
         double? gpu = await SampleGpuUsageAsync();
 
-        bool captureSourceHealthy = status.Error is null;
-        bool encoderHealthy = status.Error is null && run.Problem is null;
-        bool audioHealthy = status.Audio?.Error is null;
+        // No recorder status yet is UNKNOWN/NOT HEALTHY, never an implicit PASS.
+        bool captureSourceHealthy = status is not null && status.Error is null;
+        bool encoderHealthy = status is not null && status.Error is null && run.Problem is null;
+        bool audioHealthy = status is not null && status.Audio?.Error is null;
         bool hudHiddenAtPreflight = _arma3Hud.LastPreflight?.HudHidden == true;
 
         var telemetry = new PerformanceTelemetry(
-            gameFps, gameFpsMin, status.Fps, status.Frames, status.Dropped, status.Duplicates, status.Starved,
+            gameFps, gameFpsMin, status?.Fps ?? 0, status?.Frames ?? 0,
+            status?.Dropped ?? 0, status?.Duplicates ?? 0, status?.Starved ?? 0,
             cpu, gpu, encoderHealthy, captureSourceHealthy, audioHealthy, gameRunning,
             hudHiddenAtPreflight, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
