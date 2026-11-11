@@ -663,6 +663,18 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         bool ok = result.CaptureOk;
         string? failure = ok ? null : result.Failure ?? "capture failed";
         await SendDoneAsync(new Done(s.SessionId, ok, failure, result.Report), stop);
+
+        // Publish idle only after the completed run has been detached. Otherwise the host can start another round
+        // with the same Task ID while _run still points at the previous take; the next Stop can then target that stale run.
+        lock (_gate)
+        {
+            if (ReferenceEquals(_run, run)) _run = null;
+            if (_runSessionId == s.SessionId) _runSessionId = null;
+            if (_startingSessionId == s.SessionId) _startingSessionId = null;
+            _stopBeforeStart?.Dispose();
+            _stopBeforeStart = null;
+        }
+
         await SendAsync(new AgentState("idle"), stop);
         Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : failure)}" +
                     (result.Report is { } report ? $"; {report.Verdict}{(report.Problems() is { Count: > 0 } p ? $": {string.Join("; ", p)}" : "")}" : ""));
@@ -670,11 +682,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             Log?.Invoke($"{s.SessionId} audio: {audio.Source}{(audio.FallbackReason is { } f ? $" ({f})" : "")}" +
                         $"{(audio.SilentRatio is double r ? $", {r:P0} silent" : "")}{(audio.Error is { } e ? $", {e}" : "")}");
         RoundKept?.Invoke(s.SessionId, result);
-        lock (_gate)
-        {
-            _run = null;
-            _runSessionId = null;
-        }
     }
 
     /// <summary>Moves an earlier take out of the active Task folder. Failure blocks the new recording; no prior video is deleted.</summary>
