@@ -121,3 +121,18 @@
 - Static inspection/build success is not Windows gameplay PASS.
 - Every QA row records environment, exact build/commit, action, expected/observed result, PASS/FAIL/BLOCKED, redacted logs, media duration/resolution/FPS/audio and SHA-256.
 - Never include access keys, OBS passwords, machine IDs, private player data or gameplay video in public source/test artifacts.
+
+
+## CI checkpoint — 2026-11-11
+
+- Commit under test: `47ccb637c9f88926cbd86fb3ed716dc5a8360d05`.
+- Windows 2025 / .NET 10 full solution build: **PASS**, 0 warnings, 0 errors. This includes the new Guard evaluator and tests.
+- Reforger launcher build: **PASS**; artifact `OdxReforger` uploaded.
+- Full test suite: **FAIL**, 257 passed, 3 failed, 4 skipped (264 total).
+- Failed tests are in the pre-existing orchestrator test suite and untouched source/test files:
+  - `RoundBecomesV3SessionWithPerPlayerStopsAndFrameIndexedEvents`: timeout waiting for assembled session.
+  - `TheHostNamesTheRoundAndEveryPlayersFolderTakesThatName`: timeout waiting for member take completion on the repeated Task ID path.
+  - `StartAndStopCarryTheRoundsTimesAndEveryPlayersVerdictReachesTheRoundFiles`: Room status `problem` fields serialize as empty strings where the test expects null.
+- The two Team4 compile errors present on the integrated baseline were corrected in `MainWindow.Team4.cs`: catch variable shadowing and null handling for recorder status. Missing recorder status now reports unhealthy/unknown rather than implicit healthy.
+- No complete ODX application package is published by this run because the Windows job stops after test failure. No Windows gameplay test, Guard UI integration, AI HUD detection, retake workflow, or capture-exclusion proof has passed yet.
+- PR remains draft and unmerged. Do not release until the three orchestrator failures are resolved or isolated with evidence, then all Guard integration and Windows gameplay gates pass.
