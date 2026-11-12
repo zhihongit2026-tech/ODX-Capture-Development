@@ -31,8 +31,13 @@ jobs:
         shell: pwsh
         env:
           MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+          ODX_ORCHESTRATOR: ${{ vars.ODX_ORCHESTRATOR }}
+          ODX_ACCESS_KEY: ${{ secrets.ODX_ACCESS_KEY }}
+          ODX_VENDOR_NAME: ${{ vars.ODX_VENDOR_NAME }}
+          ODX_FRAMES_BIN_MAGIC: ${{ vars.ODX_FRAMES_BIN_MAGIC }}
+          ODX_FRAMES_BIN_RECORD_TYPE: ${{ vars.ODX_FRAMES_BIN_RECORD_TYPE }}
         run: |
-          ./publish.ps1 -Version 0.3.5-f10-240s-candidate
+          ./publish.ps1 -Version 0.3.5-f10-240s-candidate -Orchestrator $env:ODX_ORCHESTRATOR -AccessKey $env:ODX_ACCESS_KEY -VendorName $env:ODX_VENDOR_NAME -FramesBinMagic $env:ODX_FRAMES_BIN_MAGIC -FramesBinRecordType $env:ODX_FRAMES_BIN_RECORD_TYPE
           $package = "dist/odx-capture-0.3.5-f10-240s-candidate-win-x64.zip"
           if (-not (Test-Path $package)) { throw "Candidate package not found: $package" }
           $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLower()
