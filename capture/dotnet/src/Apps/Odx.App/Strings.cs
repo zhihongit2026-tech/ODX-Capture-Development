@@ -87,6 +87,7 @@ public sealed class Strings
     public required string Ready { get; init; }
     public required Func<string, string> ReadyWithEncoder { get; init; }
     public required Func<int, string> CountdownStatus { get; init; }
+    public required string StandStill { get; init; }
     public required string Cancelled { get; init; }
     public required string StartingCapture { get; init; }
     public required Func<TimeSpan, RecorderStatus?, string, string> RecordingStatus { get; init; }
@@ -225,6 +226,7 @@ public sealed class Strings
             _ => "Ready · video encoder: x264 (CPU; no GPU encoder available here)",
         },
         CountdownStatus = n => $"Recording starts in {n}…",
+        StandStill = "TEAM: STAY STILL — KEEP YOUR POSITION",
         Cancelled = "Cancelled",
         StartingCapture = "Starting capture…",
         RecordingStatus = (elapsed, c, dir) =>
@@ -378,6 +380,7 @@ public sealed class Strings
             _ => "Sẵn sàng · mã hóa video: x264 (CPU; máy này không có bộ mã hóa GPU)",
         },
         CountdownStatus = n => $"Bắt đầu ghi sau {n}…",
+        StandStill = "CẢ ĐỘI ĐỨNG IM — GIỮ NGUYÊN VỊ TRÍ",
         Cancelled = "Đã hủy",
         StartingCapture = "Đang khởi động ghi…",
         RecordingStatus = (elapsed, c, dir) =>

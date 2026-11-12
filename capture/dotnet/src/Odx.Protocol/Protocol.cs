@@ -31,6 +31,23 @@ public static class GameEvents
     public static string? Text(JsonObject e, string key) => e[key] is JsonValue v && v.TryGetValue(out string? s) ? s : null;
 }
 
+/// <summary>Shared round deadline: the countdown is part of the total recording window.</summary>
+public static class RoundTiming
+{
+    public const double TotalDurationMs = 235_000;
+
+    /// <summary>StartUtcMs is play-start; subtract the pre-roll countdown to recover the round's countdown start.</summary>
+    public static double CountdownStartUtcMs(double playStartUtcMs, int countdownMs)
+    {
+        if (countdownMs < 0) throw new ArgumentOutOfRangeException(nameof(countdownMs));
+        return playStartUtcMs - countdownMs;
+    }
+
+    /// <summary>The common stop deadline, exactly 03:55 after the countdown began.</summary>
+    public static double EndUtcMs(double playStartUtcMs, int countdownMs) =>
+        CountdownStartUtcMs(playStartUtcMs, countdownMs) + TotalDurationMs;
+}
+
 /// <summary>
 /// WebSocket messages between an agent and the orchestrator, one JSON object each. An agent is a player's capture machine or
 /// the game server's (<see cref="Hello.Role"/>).

@@ -2,7 +2,7 @@ using System.Windows;
 
 namespace Odx.App;
 
-/// <summary>The countdown, "END" and the processing phases after it in the middle of the screen (<see cref="Overlay"/>).</summary>
+/// <summary>The countdown, recording timer, "END" and processing phases, all excluded from capture (<see cref="Overlay"/>).</summary>
 public partial class CountdownOverlay : Window
 {
     public CountdownOverlay() => InitializeComponent();
@@ -10,6 +10,15 @@ public partial class CountdownOverlay : Window
     public int Seconds
     {
         set => Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    public string Reminder
+    {
+        set
+        {
+            ReminderText.Text = value;
+            ReminderText.Visibility = string.IsNullOrWhiteSpace(value) ? Visibility.Collapsed : Visibility.Visible;
+        }
     }
 
     public string Text

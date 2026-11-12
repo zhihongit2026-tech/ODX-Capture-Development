@@ -69,6 +69,12 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// </summary>
     public event Action<int, CancellationToken>? Countdown;
 
+    /// <summary>
+    /// Shared room timer for the full 03:55 window. The UTC values are converted to this machine's clock for display;
+    /// only the orchestrator sends the authoritative Stop.
+    /// </summary>
+    public event Action<string, double, double, int, CancellationToken>? RoundTimerStarted;
+
     /// <summary>Raised with the room's latest state, or null once out of it (left, closed by the host).</summary>
     public event Action<RoomUpdate?>? RoomChanged;
 
@@ -541,6 +547,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
+        double playStartUtcMs = s.StartUtcMs ?? (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + s.CountdownMs);
+        double clockOffsetMs = Clock?.ReferenceOffsetMs ?? 0;
+        double countdownStartLocalUtcMs = RoundTiming.CountdownStartUtcMs(playStartUtcMs, s.CountdownMs) - clockOffsetMs;
+        double deadlineLocalUtcMs = RoundTiming.EndUtcMs(playStartUtcMs, s.CountdownMs) - clockOffsetMs;
+        RoundTimerStarted?.Invoke(s.SessionId, countdownStartLocalUtcMs, deadlineLocalUtcMs, s.CountdownMs, stopped);
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
         string folder = Path.Combine(options.OutputRoot, s.SessionId);
         if (Directory.Exists(folder))

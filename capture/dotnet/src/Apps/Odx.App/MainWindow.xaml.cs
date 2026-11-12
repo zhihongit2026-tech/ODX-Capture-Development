@@ -43,6 +43,8 @@ public partial class MainWindow : Window
     private readonly DailyLogFile _log = new(PackageFolders.Logs);
     private readonly bool _obsRows;
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _sessionTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly Stopwatch _soloSessionClock = new();
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
     private Strings _t = Strings.En;
@@ -53,6 +55,10 @@ public partial class MainWindow : Window
     private CaptureRun? _run;
     private DispatcherTimer? _countdown;
     private CountdownOverlay? _overlay;
+    private CountdownOverlay? _roomTimerOverlay;
+    private DispatcherTimer? _roomTimer;
+    private CancellationTokenRegistration _roomTimerCancellation;
+    private string? _roomTimerSessionId;
     private int _countdownLeft;
     private DateTime _runStarted;
     private bool _closeWhenIdle;
@@ -103,6 +109,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => ShowRecordingStatus();
+        _sessionTimer.Tick += (_, _) => UpdateSoloTimer();
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -205,6 +212,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _sessionTimer.Stop();
+        _soloSessionClock.Stop();
+        CloseRoomTimer();
         UnregisterHotKey(_hwnd, HotkeyId);
         _tray.Dispose();
         _packets.Dispose();
@@ -386,8 +396,10 @@ public partial class MainWindow : Window
 
     private void BeginCountdown()
     {
+        _soloSessionClock.Restart();
+        _sessionTimer.Start();
         _countdownLeft = CountdownSeconds;
-        _overlay = new CountdownOverlay();
+        _overlay = new CountdownOverlay { Reminder = _t.StandStill };
         _overlay.Show();
         _countdown = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _countdown.Tick += (_, _) =>
@@ -397,8 +409,9 @@ public partial class MainWindow : Window
                 ShowCountdown();
                 return;
             }
-            // The overlay is closed before odx record starts, so it never appears in the video.
-            EndCountdown();
+            // The overlay is excluded from capture; keep it open as the 03:55 timer.
+            EndCountdown(closeOverlay: false);
+            if (_overlay is not null) _overlay.Reminder = "";
             StartRecording();
         };
         _countdown.Start();
@@ -416,15 +429,51 @@ public partial class MainWindow : Window
     private void CancelCountdown()
     {
         EndCountdown();
+        StopSoloTimer();
         SetState(RunState.Idle, t => t.Cancelled);
     }
 
-    private void EndCountdown()
+    private void EndCountdown(bool closeOverlay = true)
     {
         _countdown?.Stop();
         _countdown = null;
+        if (closeOverlay)
+        {
+            _overlay?.Close();
+            _overlay = null;
+        }
+    }
+
+    private void UpdateSoloTimer()
+    {
+        if (!_sessionTimer.IsEnabled) return;
+        double remainingMs = RoundTiming.TotalDurationMs - _soloSessionClock.Elapsed.TotalMilliseconds;
+        if (_state != RunState.Countdown && _overlay is not null)
+        {
+            _overlay.Reminder = "";
+            _overlay.Text = FormatTimer(remainingMs);
+        }
+        if (remainingMs > 0) return;
+
+        StopSoloTimer();
+        if (_state == RunState.Countdown)
+            CancelCountdown();
+        else if (_run is not null && (_state is RunState.Starting or RunState.Recording))
+            StopRecording();
+    }
+
+    private void StopSoloTimer()
+    {
+        _sessionTimer.Stop();
+        _soloSessionClock.Stop();
         _overlay?.Close();
         _overlay = null;
+    }
+
+    private static string FormatTimer(double remainingMs)
+    {
+        int seconds = Math.Max(0, (int)Math.Ceiling(remainingMs / 1000.0));
+        return $"{seconds / 60:00}:{seconds % 60:00}";
     }
 
     private void StartRecording()
@@ -438,6 +487,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             string error = ex.Message;
+            StopSoloTimer();
             SetState(RunState.Idle, t => t.CouldNotStart(error));
             return;
         }
@@ -496,12 +546,15 @@ public partial class MainWindow : Window
 
     private void StopRecording()
     {
+        StopSoloTimer();
+        CloseRoomTimer();
         SetState(RunState.Stopping, t => t.StoppingStatus);
         _run!.Stop();
     }
 
     private void OnRunCompleted(RunResult result)
     {
+        StopSoloTimer();
         _run = null;
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
@@ -571,7 +624,8 @@ public partial class MainWindow : Window
             TimeServer: _config.TimeServer),
             StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
-        agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
+        agent.RoundTimerStarted += (sessionId, countdownStart, deadline, countdownMs, cancelled) =>
+            ShowAgentRoundTimer(sessionId, countdownStart, deadline, countdownMs, cancelled);
         room.Changed += () => Dispatcher.BeginInvoke(() =>
         {
             if (_room == room && _run is null && _state == RunState.Agent) ShowAgentStatus();
@@ -690,6 +744,7 @@ public partial class MainWindow : Window
 
     private void Disconnect(Func<Strings, string> status)
     {
+        CloseRoomTimer();
         _room?.Dispose();
         _room = null;
         if (_run is null) SetState(RunState.Idle, status);
@@ -768,7 +823,59 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>The same 3-2-1 as a solo recording, shown while the capture already runs (the overlay is excluded from it).</summary>
+    /// <summary>Displays the shared Orchestrator deadline; the local overlay never stops a multiplayer recording.</summary>
+    private void ShowAgentRoundTimer(string sessionId, double countdownStartLocalUtcMs, double deadlineLocalUtcMs,
+        int countdownMs, CancellationToken cancelled)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            CloseRoomTimer();
+            _roomTimerSessionId = sessionId;
+            var overlay = new CountdownOverlay();
+            _roomTimerOverlay = overlay;
+            overlay.Show();
+
+            var countdownClock = Stopwatch.StartNew();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            _roomTimer = timer;
+            void Update()
+            {
+                if (_roomTimerSessionId != sessionId || cancelled.IsCancellationRequested)
+                {
+                    CloseRoomTimer(sessionId);
+                    return;
+                }
+                if (countdownMs > 0 && countdownClock.ElapsedMilliseconds < countdownMs)
+                {
+                    int left = Math.Max(1, (int)Math.Ceiling((countdownMs - countdownClock.ElapsedMilliseconds) / 1000.0));
+                    overlay.Seconds = left;
+                    overlay.Reminder = _t.StandStill;
+                    return;
+                }
+                overlay.Reminder = "";
+                double remainingMs = deadlineLocalUtcMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                overlay.Text = FormatTimer(remainingMs);
+            }
+            timer.Tick += (_, _) => Update();
+            timer.Start();
+            Update();
+            _roomTimerCancellation = cancelled.Register(() =>
+                Dispatcher.BeginInvoke(() => CloseRoomTimer(sessionId)));
+        });
+    }
+
+    private void CloseRoomTimer(string? sessionId = null)
+    {
+        if (sessionId is not null && _roomTimerSessionId != sessionId) return;
+        _roomTimerCancellation.Dispose();
+        _roomTimer?.Stop();
+        _roomTimer = null;
+        _roomTimerOverlay?.Close();
+        _roomTimerOverlay = null;
+        _roomTimerSessionId = null;
+    }
+
+    /// <summary>The legacy countdown hook remains available to non-UI consumers.</summary>
     private void ShowAgentCountdown(int countdownMs, CancellationToken cancelled)
     {
         int left = (int)Math.Ceiling(countdownMs / 1000.0);
@@ -813,6 +920,7 @@ public partial class MainWindow : Window
 
     private void OnAgentRunCompleted(RunResult result)
     {
+        CloseRoomTimer();
         _run = null;
         _clock.Stop();
         // The notice comes once the capture is built (RoundKept).
