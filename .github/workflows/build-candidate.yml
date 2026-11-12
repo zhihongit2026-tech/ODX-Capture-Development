@@ -1,0 +1,115 @@
+name: Build ODX Capture Candidate
+
+on:
+  push:
+    branches:
+      - work/auto-record-235s-v0.3.6
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+
+      - uses: actions/cache@v4
+        with:
+          path: capture/dotnet/.cache/ffmpeg-*
+          key: ffmpeg-${{ hashFiles('capture/dotnet/ffmpeg/build-ffmpeg.sh') }}
+
+      - name: Verify protected source configuration
+        shell: pwsh
+        run: |
+          git diff --exit-code origin/main...HEAD -- capture/config/odx-capture.json
+          if ($LASTEXITCODE -ne 0) { throw 'Protected odx-capture.json differs from main' }
+          $sourceConfig = Join-Path $env:GITHUB_WORKSPACE 'capture/config/odx-capture.json'
+          $hash = (Get-FileHash $sourceConfig -Algorithm SHA256).Hash.ToLowerInvariant()
+          "ODX_CONFIG_SHA256=$hash" >> $env:GITHUB_ENV
+          Write-Host "Protected config SHA-256: $hash"
+
+      - name: Build Windows x64 package
+        working-directory: capture/dotnet
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./publish.ps1 -Version 0.3.6
+          if ($LASTEXITCODE -ne 0) { throw 'publish.ps1 failed' }
+
+      - name: Restore exact protected config and rebuild Candidate ZIP
+        shell: pwsh
+        run: |
+          $name = 'odx-capture-0.3.6-win-x64'
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'capture/dotnet/dist'
+          $out = Join-Path $dist $name
+          $sourceConfig = Join-Path $env:GITHUB_WORKSPACE 'capture/config/odx-capture.json'
+          $packageConfig = Join-Path $out 'bin/odx-capture.json'
+          Copy-Item -LiteralPath $sourceConfig -Destination $packageConfig -Force
+
+          $restoredHash = (Get-FileHash $packageConfig -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($restoredHash -ne $env:ODX_CONFIG_SHA256) {
+            throw "Protected config changed during package: expected $env:ODX_CONFIG_SHA256, got $restoredHash"
+          }
+
+          Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+          $packageZip = Join-Path $dist "$name.zip"
+          if (Test-Path $packageZip) { Remove-Item -LiteralPath $packageZip -Force }
+          $zip = [IO.Compression.ZipFile]::Open($packageZip, [IO.Compression.ZipArchiveMode]::Create)
+          try {
+            $launcher = Get-Item (Join-Path $out 'Odx Capture.exe')
+            $files = @($launcher) + @(Get-ChildItem (Join-Path $out 'bin') -Recurse -File)
+            foreach ($file in $files) {
+              $relative = $file.FullName.Substring($out.Length + 1).Replace('\', '/')
+              $entry = "$name/$relative"
+              [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $file.FullName, $entry, [IO.Compression.CompressionLevel]::Optimal
+              ) | Out-Null
+            }
+            foreach ($folder in 'data/captures/', 'data/delivery/') {
+              $zip.CreateEntry("$name/$folder") | Out-Null
+            }
+          }
+          finally { $zip.Dispose() }
+
+          $checkZip = [IO.Compression.ZipFile]::OpenRead($packageZip)
+          try {
+            $entry = $checkZip.GetEntry("$name/bin/odx-capture.json")
+            if ($null -eq $entry) { throw 'Protected config missing from Candidate ZIP' }
+            $stream = $entry.Open()
+            try {
+              $memory = New-Object System.IO.MemoryStream
+              $stream.CopyTo($memory)
+              $bytes = $memory.ToArray()
+              $zipHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+            }
+            finally { $stream.Dispose() }
+            if ($zipHash -ne $env:ODX_CONFIG_SHA256) {
+              throw "ZIP config SHA-256 mismatch: expected $env:ODX_CONFIG_SHA256, got $zipHash"
+            }
+          }
+          finally { $checkZip.Dispose() }
+
+          Get-FileHash $packageZip -Algorithm SHA256 | Format-List
+          Write-Host "Candidate ready: $packageZip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.6-Candidate-win-x64
+          path: capture/dotnet/dist/odx-capture-0.3.6-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14
