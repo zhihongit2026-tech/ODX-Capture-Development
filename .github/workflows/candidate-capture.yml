@@ -1,0 +1,49 @@
+name: Build F10 240s Windows Candidate
+
+on:
+  push:
+    branches: [fix/f10-auto-stop-240s]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+      - uses: actions/cache@v4
+        with:
+          path: capture/dotnet/.cache/ffmpeg-*
+          key: ffmpeg-${{ hashFiles('capture/dotnet/ffmpeg/build-ffmpeg.sh') }}
+      - name: Build self-contained Windows x64 Candidate
+        working-directory: capture/dotnet
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./publish.ps1 -Version 0.3.5-f10-240s-candidate
+          $package = "dist/odx-capture-0.3.5-f10-240s-candidate-win-x64.zip"
+          if (-not (Test-Path $package)) { throw "Candidate package not found: $package" }
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLower()
+          "$hash  odx-capture-0.3.5-f10-240s-candidate-win-x64.zip" | Set-Content -Encoding ascii "dist/odx-capture-0.3.5-f10-240s-candidate-win-x64.zip.sha256"
+          Write-Host "Candidate SHA-256: $hash"
+      - name: Upload Windows Candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-F10-240s-Windows-Candidate
+          path: |
+            capture/dotnet/dist/odx-capture-0.3.5-f10-240s-candidate-win-x64.zip
+            capture/dotnet/dist/odx-capture-0.3.5-f10-240s-candidate-win-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
