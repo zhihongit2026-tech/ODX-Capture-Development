@@ -131,7 +131,11 @@ public sealed partial class MatchCoordinator
             string? missed = server
                 ? round.Ended ? round.Record.EndReason ?? GameEvents.RoundEnd : null
                 : round.Record.Players[player].StopReason;
-            if (missed is not null) effects.Sends.Add((link, new Stop(sid, missed)));
+            if (missed is not null)
+            {
+                double? missedEndUtcMs = server ? round.Record.EndUtcMs : round.Record.Players[player].StopUtcMs;
+                effects.Sends.Add((link, new Stop(sid, missed, missedEndUtcMs)));
+            }
         }
     }
 

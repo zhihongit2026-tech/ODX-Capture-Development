@@ -217,6 +217,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             }).ToList();
         }
         foreach (var (link, message) in effects.Sends.Concat(updates)) await SendAsync(link, message);
+        foreach (var round in effects.AutoStops) ScheduleAutoStop(round);
         foreach (var (network, node) in effects.LanRevoke)
         {
             try

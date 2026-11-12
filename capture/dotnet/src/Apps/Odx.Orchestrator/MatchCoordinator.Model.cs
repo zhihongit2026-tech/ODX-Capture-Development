@@ -55,6 +55,8 @@ public sealed partial class MatchCoordinator
         /// <summary>The game server agent recording this round; it is done once it kept its side (or failed to).</summary>
         public string? Server { get; init; }
         public bool ServerDone { get; set; }
+        public CancellationTokenSource? AutoStopCancellation { get; set; }
+        public double AutoStopUtcMs => RoundTiming.EndUtcMs(Record.StartUtcMs, Record.CountdownMs);
         /// <summary>Players who lost their connection while recording it, kept until <see cref="OrchestratorOptions.ReconnectGrace"/>.</summary>
         public HashSet<string> Away { get; } = [];
 
@@ -67,6 +69,7 @@ public sealed partial class MatchCoordinator
         public List<(AgentLink, AgentMessage)> Sends { get; } = [];
         public List<OpenRound> Ended { get; } = [];
         public List<OpenRound> Cancelled { get; } = [];
+        public List<OpenRound> AutoStops { get; } = [];
         public OpenRound? Countdown { get; set; }
         public HashSet<Room> Changed { get; } = [];
         public List<(string Network, string Node)> LanRevoke { get; } = [];
