@@ -55,6 +55,9 @@ public partial class MainWindow : Window
     private CountdownOverlay? _overlay;
     private int _countdownLeft;
     private DateTime _runStarted;
+    private readonly Stopwatch _soloElapsed = new();
+    private CancellationTokenSource? _soloAutoStop;
+    private static readonly TimeSpan SoloRecordingLimit = TimeSpan.FromSeconds(240);
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -447,9 +450,12 @@ public partial class MainWindow : Window
         {
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
+            _soloElapsed.Restart();
+            _soloAutoStop = new CancellationTokenSource();
             SetState(RunState.Recording);
             _clock.Start();
             ShowRecordingStatus();
+            _ = StopSoloAfterLimitAsync(run, _soloAutoStop.Token);
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
         // Shown only once the capture has ended, so the badge never ends up in the video.
         run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -494,14 +500,31 @@ public partial class MainWindow : Window
             SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
+    private async Task StopSoloAfterLimitAsync(CaptureRun run, CancellationToken cancel)
+    {
+        try { await Task.Delay(SoloRecordingLimit, cancel); }
+        catch (OperationCanceledException) { return; }
+        await Dispatcher.InvokeAsync(() =>
+        {
+            if (_run == run && _state == RunState.Recording)
+                StopRecording();
+        });
+    }
+
     private void StopRecording()
     {
+        _soloAutoStop?.Cancel();
+        _soloElapsed.Stop();
         SetState(RunState.Stopping, t => t.StoppingStatus);
         _run!.Stop();
     }
 
     private void OnRunCompleted(RunResult result)
     {
+        _soloAutoStop?.Cancel();
+        _soloAutoStop?.Dispose();
+        _soloAutoStop = null;
+        _soloElapsed.Reset();
         _run = null;
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
@@ -513,7 +536,8 @@ public partial class MainWindow : Window
     private void ShowRecordingStatus()
     {
         if (_run is null || _state is not (RunState.Recording or RunState.Agent)) return;
-        var elapsed = DateTime.Now - _runStarted;
+        var elapsed = _state == RunState.Recording && _soloAutoStop is not null
+            ? _soloElapsed.Elapsed : DateTime.Now - _runStarted;
         var status = _run.LastStatus;
         string dir = _run.SessionDir;
         SetStatus(t => t.RecordingStatus(elapsed, status, dir));
