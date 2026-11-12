@@ -4,7 +4,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Threading;
 using Odx.Agent;
 using Odx.Capture;
@@ -19,7 +18,8 @@ public sealed record SourceItem(string Label, string? Process)
     public override string ToString() => Label;  // what screen readers announce
 }
 
-public sealed record GameItem(string Label, string? Path, string? WindowProcess = null)
+/// <param name="Game">The profile's game_title, what a room opened with this choice plays; null for no profile.</param>
+public sealed record GameItem(string Label, string? Path, string? WindowProcess = null, string? Game = null)
 {
     public override string ToString() => Label;
 }
@@ -33,9 +33,10 @@ public sealed record ObsCheck(string Version, int Width, int Height, double Fps,
 
 public partial class MainWindow : Window
 {
-    private const int WM_HOTKEY = 0x0312;
-    private const int HotkeyId = 1;
-    private const uint MOD_NOREPEAT = 0x4000;
+    // A low-level keyboard hook, not RegisterHotKey: Raw Input games (Arma 3's RIDEV_NOHOTKEYS) stop RegisterHotKey hotkeys
+    // reaching us while they are in the foreground, but a WH_KEYBOARD_LL hook sits below Raw Input and still fires.
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104, WM_KEYUP = 0x0101, WM_SYSKEYUP = 0x0105;
     private const int CountdownSeconds = 3;
 
     private readonly AppSettings _settings = AppSettings.Load();
@@ -48,7 +49,12 @@ public partial class MainWindow : Window
     private Strings _t = Strings.En;
     /// <summary>Renders the status line; kept so a language switch re-renders it.</summary>
     private Func<Strings, string> _status = t => t.Ready;
-    private IntPtr _hwnd;
+    private IntPtr _hook;
+    private LowLevelKeyboardProc? _hookProc;
+    /// <summary>Set while the hotkey box is being rebound, so the pressed combination assigns instead of toggling.</summary>
+    private bool _hotkeySuspended;
+    /// <summary>The hotkey is down, so auto-repeat keydowns don't toggle more than once per press.</summary>
+    private bool _hotkeyDown;
     private RunState _state = RunState.Idle;
     private CaptureRun? _run;
     private DispatcherTimer? _countdown;
@@ -180,9 +186,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        _hwnd = new WindowInteropHelper(this).Handle;
-        HwndSource.FromHwnd(_hwnd).AddHook(WndProc);
-        RegisterHotkey();
+        InstallHook();
     }
 
     protected override void OnStateChanged(EventArgs e)
@@ -208,20 +212,10 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        UnregisterHotKey(_hwnd, HotkeyId);
+        if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
         _tray.Dispose();
         _packets.Dispose();
         base.OnClosed(e);
-    }
-
-    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg == WM_HOTKEY && wParam.ToInt32() == HotkeyId)
-        {
-            Toggle();
-            handled = true;
-        }
-        return IntPtr.Zero;
     }
 
     /// <summary>Also called when the app is started a second time (App: single instance).</summary>
@@ -253,7 +247,7 @@ public partial class MainWindow : Window
                 try
                 {
                     var profile = GameProfile.Load(file);
-                    items.Add(new GameItem(profile.GameTitle, file, profile.WindowProcess));
+                    items.Add(new GameItem(profile.GameTitle, file, profile.WindowProcess, profile.GameTitle));
                 }
                 catch (Exception e) when (e is IOException or FormatException or System.Text.Json.JsonException)
                 {
@@ -262,7 +256,17 @@ public partial class MainWindow : Window
                 }
             }
         if (_settings.GameProfile is string saved && File.Exists(saved) && !items.Any(i => i.Path == saved))
-            items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved));
+        {
+            string? game = null;
+            try
+            {
+                game = GameProfile.Load(saved).GameTitle;
+            }
+            catch (Exception e) when (e is IOException or FormatException or System.Text.Json.JsonException)
+            {
+            }
+            items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved, Game: game));
+        }
         GameBox.ItemsSource = items;
         GameBox.SelectedItem = items.FirstOrDefault(i => i.Path == _settings.GameProfile) ?? items[0];
     }
@@ -381,7 +385,7 @@ public partial class MainWindow : Window
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
         CreateButton.IsEnabled = idle || inRoom && _agent!.IsHost;
         CreateButton.Visibility = inRoom && !_agent!.IsHost ? Visibility.Collapsed : Visibility.Visible;
-        // In a room the orchestrator's game profile and frame rate apply.
+        // In a room the host's game (chosen here before opening it) and the orchestrator's frame rate apply.
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
@@ -592,7 +596,7 @@ public partial class MainWindow : Window
         }
         var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
             _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan,
-            TimeServer: _config.TimeServer),
+            TimeServer: _config.TimeServer, Game: code is null ? (GameBox.SelectedItem as GameItem)?.Game : null),
             StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
@@ -738,7 +742,7 @@ public partial class MainWindow : Window
         var clock = session.Agent.Clock;
         bool clockOff = _config.TimeServer is not null && clock is { Ok: false, NtpError: null };
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
-        SetStatus(t => t.RoomStatus(room.Code, host, members) + (round is null ? "" : "\n" + round(t)) +
+        SetStatus(t => t.RoomStatus(room.Code, room.Game, host, members) + (round is null ? "" : "\n" + round(t)) +
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
                        (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
                                                                (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +
@@ -892,14 +896,14 @@ public partial class MainWindow : Window
     // instead of toggling a recording.
     private void Hotkey_GotFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
-        UnregisterHotKey(_hwnd, HotkeyId);
+        _hotkeySuspended = true;
         HotkeyBox.Text = _t.PressKeys;
     }
 
     private void Hotkey_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
         HotkeyBox.Text = _settings.Hotkey.ToString();
-        RegisterHotkey();
+        _hotkeySuspended = false;
     }
 
     private void Hotkey_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -915,16 +919,63 @@ public partial class MainWindow : Window
         StartStopButton.Focus();
     }
 
-    private void RegisterHotkey()
+    private void InstallHook()
     {
-        var hk = _settings.Hotkey;
-        if (!RegisterHotKey(_hwnd, HotkeyId, (uint)hk.Modifiers | MOD_NOREPEAT, (uint)hk.VirtualKey))
-            SetStatus(t => t.HotkeyInUse(hk.ToString()));
+        _hookProc = HookProc;  // kept in a field so the delegate is not collected while the hook is live
+        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc, GetModuleHandle(null), 0);
+        if (_hook == IntPtr.Zero) SetStatus(t => t.HotkeyInUse(_settings.Hotkey.ToString()));
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && !_hotkeySuspended)
+        {
+            int msg = wParam.ToInt32();
+            var hk = _settings.Hotkey;
+            bool match = Marshal.ReadInt32(lParam) == hk.VirtualKey && CurrentModifiers() == hk.Modifiers;
+            if (match && msg is WM_KEYDOWN or WM_SYSKEYDOWN)
+            {
+                if (!_hotkeyDown)
+                {
+                    _hotkeyDown = true;
+                    Dispatcher.BeginInvoke(Toggle);
+                }
+                return 1;  // swallow so the key does not reach the game (the hotkey is never a gameplay binding)
+            }
+            if (match && msg is WM_KEYUP or WM_SYSKEYUP)
+            {
+                _hotkeyDown = false;
+                return 1;
+            }
+        }
+        return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+
+    private static HotkeyModifiers CurrentModifiers()
+    {
+        static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+        var mods = HotkeyModifiers.None;
+        if (Down(0x11)) mods |= HotkeyModifiers.Ctrl;   // VK_CONTROL
+        if (Down(0x10)) mods |= HotkeyModifiers.Shift;  // VK_SHIFT
+        if (Down(0x12)) mods |= HotkeyModifiers.Alt;    // VK_MENU
+        if (Down(0x5B) || Down(0x5C)) mods |= HotkeyModifiers.Win;  // VK_LWIN / VK_RWIN
+        return mods;
+    }
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
 }
