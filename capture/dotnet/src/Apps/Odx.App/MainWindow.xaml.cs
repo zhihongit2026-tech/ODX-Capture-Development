@@ -835,7 +835,6 @@ public partial class MainWindow : Window
             _roomTimerOverlay = overlay;
             overlay.Show();
 
-            var countdownClock = Stopwatch.StartNew();
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
             _roomTimer = timer;
             void Update()
@@ -845,15 +844,17 @@ public partial class MainWindow : Window
                     CloseRoomTimer(sessionId);
                     return;
                 }
-                if (countdownMs > 0 && countdownClock.ElapsedMilliseconds < countdownMs)
+                double nowUtcMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                double countdownRemainingMs = countdownStartLocalUtcMs + countdownMs - nowUtcMs;
+                if (countdownMs > 0 && countdownRemainingMs > 0)
                 {
-                    int left = Math.Max(1, (int)Math.Ceiling((countdownMs - countdownClock.ElapsedMilliseconds) / 1000.0));
+                    int left = Math.Max(1, (int)Math.Ceiling(countdownRemainingMs / 1000.0));
                     overlay.Seconds = left;
                     overlay.Reminder = _t.StandStill;
                     return;
                 }
                 overlay.Reminder = "";
-                double remainingMs = deadlineLocalUtcMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                double remainingMs = deadlineLocalUtcMs - nowUtcMs;
                 overlay.Text = FormatTimer(remainingMs);
             }
             timer.Tick += (_, _) => Update();
