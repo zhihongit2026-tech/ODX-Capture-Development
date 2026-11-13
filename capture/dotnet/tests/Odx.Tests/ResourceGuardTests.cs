@@ -10,15 +10,15 @@ public sealed class ResourceGuardTests
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
-        for (int i = 0; i <= 9; i++)
+        for (int i = 0; i <= 10; i++)
         {
             guard.Observe(new ResourceSnapshot(90, 40, 60), t.AddSeconds(i));
-            if (i < 9) Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_CPU");
+            if (i < 10) Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_CPU");
         }
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_CPU" && a.Severity == QualityAlertSeverity.Warning);
 
         var critical = new ResourceGuard();
-        for (int i = 0; i <= 4; i++)
+        for (int i = 0; i <= 5; i++)
             critical.Observe(new ResourceSnapshot(95, 40, 60), t.AddSeconds(i));
         Assert.Contains(critical.Alerts, a => a.Code == "RESOURCE_CPU" && a.Severity == QualityAlertSeverity.Critical);
     }
@@ -28,12 +28,12 @@ public sealed class ResourceGuardTests
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
-        for (int i = 0; i <= 4; i++)
+        for (int i = 0; i <= 5; i++)
             guard.Observe(new ResourceSnapshot(20, 90, 10), t.AddSeconds(i));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_RAM" && a.Severity == QualityAlertSeverity.Warning);
 
         var critical = new ResourceGuard();
-        for (int i = 0; i <= 2; i++)
+        for (int i = 0; i <= 3; i++)
             critical.Observe(new ResourceSnapshot(20, 92, 8), t.AddSeconds(i));
         Assert.Contains(critical.Alerts, a => a.Code == "RESOURCE_RAM" && a.Severity == QualityAlertSeverity.Critical);
     }
@@ -53,7 +53,7 @@ public sealed class ResourceGuardTests
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
-        for (int i = 0; i <= 4; i++)
+        for (int i = 0; i <= 5; i++)
             guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, FreshFps: 25), t.AddSeconds(i));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D" && a.Severity == QualityAlertSeverity.Critical);
     }
@@ -73,12 +73,12 @@ public sealed class ResourceGuardTests
     {
         var warning = new ResourceGuard();
         var t = DateTime.UtcNow;
-        for (int i = 0; i <= 4; i++)
+        for (int i = 0; i <= 5; i++)
             warning.Observe(new ResourceSnapshot(20, 40, 60, GpuEncodePercent: 90, EncoderStarvationPercent: 25), t.AddSeconds(i));
         Assert.Contains(warning.Alerts, a => a.Code == "RESOURCE_GPU_ENCODE" && a.Severity == QualityAlertSeverity.Warning);
 
         var critical = new ResourceGuard();
-        for (int i = 0; i <= 2; i++)
+        for (int i = 0; i <= 3; i++)
             critical.Observe(new ResourceSnapshot(20, 40, 60, GpuEncodePercent: 98, EncoderStarvationPercent: 30), t.AddSeconds(i));
         Assert.Contains(critical.Alerts, a => a.Code == "RESOURCE_GPU_ENCODE" && a.Severity == QualityAlertSeverity.Critical);
     }
@@ -99,12 +99,12 @@ public sealed class ResourceGuardTests
     {
         var warning = new ResourceGuard();
         var t = DateTime.UtcNow;
-        for (int i = 0; i <= 9; i++)
+        for (int i = 0; i <= 10; i++)
             warning.Observe(new ResourceSnapshot(20, 40, 60, GpuTemperatureC: 85), t.AddSeconds(i));
         Assert.Contains(warning.Alerts, a => a.Code == "RESOURCE_GPU_TEMP" && a.Severity == QualityAlertSeverity.Warning);
 
         var critical = new ResourceGuard();
-        for (int i = 0; i <= 4; i++)
+        for (int i = 0; i <= 5; i++)
             critical.Observe(new ResourceSnapshot(20, 40, 60, GpuTemperatureC: 90), t.AddSeconds(i));
         Assert.Contains(critical.Alerts, a => a.Code == "RESOURCE_GPU_TEMP" && a.Severity == QualityAlertSeverity.Critical);
     }
@@ -114,14 +114,14 @@ public sealed class ResourceGuardTests
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
-        for (int i = 0; i <= 9; i++)
+        for (int i = 0; i <= 10; i++)
             guard.Observe(new ResourceSnapshot(90, 40, 60), t.AddSeconds(i));
-        for (int i = 10; i <= 14; i++)
+        for (int i = 11; i <= 16; i++)
             guard.Observe(new ResourceSnapshot(70, 40, 60), t.AddSeconds(i));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_CPU");
-        guard.Expire(t.AddSeconds(19));
+        guard.Expire(t.AddSeconds(21));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_CPU");
-        guard.Expire(t.AddSeconds(20));
+        guard.Expire(t.AddSeconds(22));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_CPU");
     }
 }
