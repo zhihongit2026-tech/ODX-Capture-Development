@@ -36,14 +36,14 @@ public static class RoundTiming
 {
     public const double TotalDurationMs = 235_000;
 
-    /// <summary>StartUtcMs is play-start; subtract the pre-roll countdown to recover the round's countdown start.</summary>
+    /// <summary>StartUtcMs is play-start; subtract the pre-roll countdown to recover the countdown start.</summary>
     public static double CountdownStartUtcMs(double playStartUtcMs, int countdownMs)
     {
         if (countdownMs < 0) throw new ArgumentOutOfRangeException(nameof(countdownMs));
         return playStartUtcMs - countdownMs;
     }
 
-    /// <summary>The common stop deadline, exactly 03:55 after the countdown began.</summary>
+    /// <summary>The common stop deadline, exactly 03:55 after countdown began.</summary>
     public static double EndUtcMs(double playStartUtcMs, int countdownMs) =>
         CountdownStartUtcMs(playStartUtcMs, countdownMs) + TotalDurationMs;
 }
@@ -76,7 +76,7 @@ public static class RoundTiming
 public abstract record AgentMessage
 {
     /// <summary>Raised whenever a message changes in a way the other side cannot read; sent in <see cref="Hello"/>.</summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -142,16 +142,12 @@ public static class WebSocketText
     }
 }
 
-/// <summary>
-/// Orchestrator → agent: where to measure the clock (UDP port of the orchestrator's NTP responder) and the game profile its
-/// rounds use, so a player knows before any round whether packets will be captured.
-/// </summary>
+/// <summary>Orchestrator → agent: where to measure the clock (UDP port of the orchestrator's NTP responder).</summary>
 /// <param name="ReconnectGraceMs">How long a round keeps an agent that lost its connection; it records on meanwhile and
 /// stops by itself once this has passed without a reconnect.</param>
 /// <param name="ServerClock">The orchestrator's clock against its NTP server (spec v3 §4 layer 1 on the reference side);
 /// null while it has not measured it.</param>
-public sealed record Welcome(int TimePort, string? GameProfileJson = null, int ReconnectGraceMs = 30_000,
-    ServerClock? ServerClock = null) : AgentMessage;
+public sealed record Welcome(int TimePort, int ReconnectGraceMs = 30_000, ServerClock? ServerClock = null) : AgentMessage;
 
 /// <summary>Orchestrator → agent: prepare a session; the game profile (JSON) is the one the build must use.</summary>
 public sealed record Arm(string SessionId, string GameProfileJson, int Fps) : AgentMessage;
@@ -192,8 +188,10 @@ public sealed record Ready(bool IsReady) : AgentMessage;
 /// <summary>
 /// Agent → orchestrator: open a room with this player as its host; the answer is a <see cref="RoomUpdate"/> with the invite
 /// code. <paramref name="Lan"/>: give the room a virtual LAN (a ZeroTier network) for games that only play over LAN.
+/// <paramref name="Game"/>: the game_title of the game profile the room's rounds use, one the orchestrator has; null takes
+/// the orchestrator's default. A game it does not have is a <see cref="RoomError"/>.
 /// </summary>
-public sealed record CreateRoom(bool Lan = false) : AgentMessage;
+public sealed record CreateRoom(bool Lan = false, string? Game = null) : AgentMessage;
 
 /// <summary>Agent → orchestrator: join the room with this invite code (leaving any other).</summary>
 public sealed record JoinRoom(string Code) : AgentMessage;
@@ -216,9 +214,12 @@ public sealed record ToggleRound(int CountdownMs, string? SessionId = null) : Ag
 public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State, string? Problem = null);
 
 /// <summary>Orchestrator → every member whenever the room changes (members, ready, states, round).</summary>
+/// <param name="Game">The game the room's rounds record (game_title of <paramref name="GameProfileJson"/>).</param>
+/// <param name="GameProfileJson">The room's game profile, the one every round's <see cref="Arm"/> carries: its window and
+/// network tell a player before any round what will be recorded (packets want the administrator prompt).</param>
 /// <param name="LanNetworkId">The room's ZeroTier network to join; null when the room has no LAN.</param>
 public sealed record RoomUpdate(string Code, string? HostPlayerId, List<RoomMember> Members, string? CurrentSession,
-    bool Countdown, string? LanNetworkId = null) : AgentMessage;
+    bool Countdown, string Game, string GameProfileJson, string? LanNetworkId = null) : AgentMessage;
 
 /// <summary>Orchestrator → agent: a room request failed (unknown code, not the host…).</summary>
 public sealed record RoomError(string Message) : AgentMessage;
