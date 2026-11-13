@@ -42,11 +42,11 @@ public sealed class QualityGuard
             _previous = status;
             _previousAtUtc = receivedAtUtc;
             _lowFpsSamples = _freezeSamples = _starvedSamples = _noFrameSamples = 0;
-            Clear("FPS_DROP");
-            Clear("VIDEO_FREEZE");
-            Clear("VIDEO_STALLED");
-            Clear("FFMPEG_BACKPRESSURE");
-            Clear("RECORDER_HEARTBEAT");
+            ClearImmediate("FPS_DROP");
+            ClearImmediate("VIDEO_FREEZE");
+            ClearImmediate("VIDEO_STALLED");
+            ClearImmediate("FFMPEG_BACKPRESSURE");
+            ClearImmediate("RECORDER_HEARTBEAT");
         }
 
         if (status.Error is { Length: > 0 } error)
@@ -140,7 +140,7 @@ public sealed class QualityGuard
 
         _previous = status;
         _previousAtUtc = receivedAtUtc;
-        Clear("RECORDER_HEARTBEAT");
+        Clear("RECORDER_HEARTBEAT", receivedAtUtc);
     }
 
     /// <summary>Detects a missing one-second recorder progress heartbeat without blocking the capture thread.</summary>
@@ -150,10 +150,11 @@ public sealed class QualityGuard
             Set(new QualityAlert("RECORDER_HEARTBEAT", QualityAlertSeverity.Critical,
                 "Mất tín hiệu bộ ghi hình", "Không nhận được trạng thái ghi hình mới trong hơn 2,5 giây."));
         else
-            Clear("RECORDER_HEARTBEAT", receivedAtUtc);
+            Clear("RECORDER_HEARTBEAT", nowUtc);
     }
 
     private void Set(QualityAlert alert) { _alerts[alert.Code] = alert; _clearAfter.Remove(alert.Code); }
+    private void ClearImmediate(string code) { _alerts.Remove(code); _clearAfter.Remove(code); }
     private void Clear(string code, DateTime? nowUtc = null)
     {
         if (!_alerts.ContainsKey(code)) return;
