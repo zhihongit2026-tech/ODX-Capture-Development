@@ -619,9 +619,6 @@ public sealed class OrchestratorTests : IAsyncLifetime
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
     public async Task Arma3_command_menu_from_any_member_stops_party_and_marks_every_take_for_retake(bool hostTriggers)
     {
         string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "menu-template"));
@@ -669,6 +666,9 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.Contains("RECORD AGAIN", AgentClient.RoundSummary(record));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task FocusLossFromAnyPartyMemberStopsEveryParticipantAtOneEndTimestamp(bool hostTriggers)
     {
         string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "focus-template"));
