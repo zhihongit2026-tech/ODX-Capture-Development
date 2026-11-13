@@ -46,7 +46,7 @@ public class Arma3CameraTests
             Assert.Equal(2, guard.VisibleTeammates);
             Assert.Equal(2, guard.TotalTeammates);
             Assert.True(guard.PlayerAlive);
-            Assert.Equal(9, guard.SampleId);
+            Assert.Equal(9L, guard.SampleId);
         }
         finally
         {
