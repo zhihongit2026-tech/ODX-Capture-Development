@@ -720,7 +720,11 @@ public partial class MainWindow : Window
                 DateTime now = DateTime.UtcNow;
                 resourceGuard.Observe(sample, now);
                 resourceGuard.Expire(now);
-                resourceAlerts = resourceGuard.Alerts.ToArray();
+                static string Metric(double? value, string suffix = "%") => value is double number ? $"{number:0.#}{suffix}" : "N/A";
+                var liveStatus = new QualityAlert("RESOURCE_STATUS", QualityAlertSeverity.Info,
+                    $"CPU {Metric(sample.CpuPercent)} · RAM {Metric(sample.RamPercent)}",
+                    $"GPU 3D {Metric(sample.Gpu3DPercent)} · Encode {Metric(sample.GpuEncodePercent)} · VRAM {Metric(sample.DedicatedVramPercent)} · Temp {Metric(sample.GpuTemperatureC, "°C")}");
+                resourceAlerts = resourceGuard.Alerts.Append(liveStatus).ToArray();
             }
             catch
             {
@@ -741,8 +745,9 @@ public partial class MainWindow : Window
                     _resourceAlerts = resourceAlerts.ToArray();
                     var alerts = qualityGuard.Alerts.Concat(_resourceAlerts).ToArray();
                     _smartGuardOverlay?.UpdateAlerts(alerts);
-                    if (alerts.Length > 0)
-                        SetStatus(_ => string.Join(" | ", alerts.Select(a => a.Title + ": " + a.Detail)));
+                    var actionable = alerts.Where(a => a.Severity != QualityAlertSeverity.Info).ToArray();
+                    if (actionable.Length > 0)
+                        SetStatus(_ => string.Join(" | ", actionable.Select(a => a.Title + ": " + a.Detail)));
                 }));
             }
             catch (InvalidOperationException) { }
