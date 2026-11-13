@@ -42,7 +42,7 @@ public sealed class Arma3GuardEvaluator
 
         _telemetryAvailable = true;
         Clear("ARMA3_TELEMETRY_NOT_VERIFIED", nowUtc);
-        if (sample.SampleId == _lastSampleId)
+        if (sample.SampleId == 0 || sample.SampleId == _lastSampleId)
             return new Arma3GuardUpdate(Alerts, _stopReason, !before.SequenceEqual(Snapshot()));
         _lastSampleId = sample.SampleId;
 
