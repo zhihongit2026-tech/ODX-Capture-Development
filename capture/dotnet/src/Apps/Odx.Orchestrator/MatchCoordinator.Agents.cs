@@ -55,7 +55,7 @@ public sealed partial class MatchCoordinator
             return;
         }
         log.LogInformation("agent {Player} ({Name}, {Version}) connected", hello.PlayerId, hello.Name, hello.ToolVersion);
-        await SendAsync(link, new Welcome(timePort, (int)options.ReconnectGrace.TotalMilliseconds,
+        await SendAsync(link, new Welcome(timePort, _profileJson, (int)options.ReconnectGrace.TotalMilliseconds,
             Volatile.Read(ref _serverClock)));
         await RunAsync(resumed);
 
@@ -169,7 +169,7 @@ public sealed partial class MatchCoordinator
             Resume(link, resumed);
         }
         log.LogInformation("game server agent {Id} ({Name}, {Version}) connected", link.Id, link.Hello.Name, link.Hello.ToolVersion);
-        await SendAsync(link, new Welcome(timePort, (int)options.ReconnectGrace.TotalMilliseconds,
+        await SendAsync(link, new Welcome(timePort, _profileJson, (int)options.ReconnectGrace.TotalMilliseconds,
             Volatile.Read(ref _serverClock)));
         await RunAsync(resumed);
         try

@@ -55,6 +55,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private readonly ConcurrentDictionary<long, double> _eventReceipts = new();
     private ICaptureRun? _run;
     private string? _runSessionId, _startingSessionId, _stopReason;
+    private double? _stopEndUtcMs;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -496,6 +497,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 lock (_gate)
                 {
                     _stopReason = null;
+                    _stopEndUtcMs = null;
                     _startingSessionId = s.SessionId;
                     _stopBeforeStart = CancellationTokenSource.CreateLinkedTokenSource(stop);
                 }
@@ -541,6 +543,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         lock (_gate)
         {
+            _stopEndUtcMs = endUtcMs;
             _stopBeforeStart?.Cancel();
             _run?.Stop(endUtcMs);
         }
@@ -589,7 +592,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _run = run;
             _runSessionId = s.SessionId;
             _startingSessionId = null;
-            if (stopped.IsCancellationRequested) run.Stop();
+            if (stopped.IsCancellationRequested) run.Stop(_stopEndUtcMs);
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
         run.ProblemChanged += problem =>
@@ -638,6 +641,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             _run = null;
             _runSessionId = null;
+            _stopBeforeStart?.Cancel();
+            _stopEndUtcMs = null;
         }
     }
 
@@ -679,7 +684,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <param name="cancelled">A cancelled round: the orchestrator waits for nobody, so the Done is not sent again.</param>
     private async Task EndWithoutCaptureAsync(string sessionId, string reason, CancellationToken stop, bool cancelled = false)
     {
-        lock (_gate) _startingSessionId = null;
+        lock (_gate)
+        {
+            _startingSessionId = null;
+            _stopBeforeStart?.Cancel();
+        }
         var done = new Done(sessionId, false, reason);
         await (cancelled ? SendAsync(done, stop) : SendDoneAsync(done, stop));
         await SendAsync(new AgentState("idle"), stop);

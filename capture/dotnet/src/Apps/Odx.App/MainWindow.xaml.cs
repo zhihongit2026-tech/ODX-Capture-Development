@@ -54,8 +54,6 @@ public partial class MainWindow : Window
     private RunState _state = RunState.Idle;
     private CaptureRun? _run;
     private DispatcherTimer? _countdown;
-    private CountdownOverlay? _overlay;
-    private CountdownOverlay? _roomTimerOverlay;
     private DispatcherTimer? _roomTimer;
     private CancellationTokenRegistration _roomTimerCancellation;
     private string? _roomTimerSessionId;
@@ -131,6 +129,7 @@ public partial class MainWindow : Window
         GameLabel.Content = _t.GameProfile;
         FpsLabel.Content = _t.Fps;
         HotkeyLabel.Content = _t.Hotkey;
+        TimerCaption.Text = _settings.Language == "vi" ? "THỜI GIAN CÒN LẠI" : "TIME REMAINING";
         PlayerLabel.Content = _t.PlayerId;
         PlayerBox.ToolTip = _t.PlayerIdTooltip;
         NameLabel.Content = _t.PlayerName;
@@ -186,6 +185,8 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
         HwndSource.FromHwnd(_hwnd).AddHook(WndProc);
+        // Keep ODX's timer visible to the player but excluded from monitor capture.
+        Overlay.ExcludeFromCapture(this);
         RegisterHotkey();
     }
 
@@ -214,6 +215,7 @@ public partial class MainWindow : Window
     {
         _sessionTimer.Stop();
         _soloSessionClock.Stop();
+        TimerPanel.Visibility = Visibility.Collapsed;
         CloseRoomTimer();
         UnregisterHotKey(_hwnd, HotkeyId);
         _tray.Dispose();
@@ -399,8 +401,10 @@ public partial class MainWindow : Window
         _soloSessionClock.Restart();
         _sessionTimer.Start();
         _countdownLeft = CountdownSeconds;
-        _overlay = new CountdownOverlay { Reminder = _t.StandStill };
-        _overlay.Show();
+        TimerPanel.Visibility = Visibility.Visible;
+        TimerCaption.Text = _settings.Language == "vi" ? "BẮT ĐẦU SAU" : "STARTING IN";
+        TimerText.Text = _countdownLeft.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        TimerReminderText.Text = _t.StandStill;
         _countdown = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _countdown.Tick += (_, _) =>
         {
@@ -409,10 +413,11 @@ public partial class MainWindow : Window
                 ShowCountdown();
                 return;
             }
-            // The overlay is excluded from capture; keep it open as the 03:55 timer.
-            EndCountdown(closeOverlay: false);
-            if (_overlay is not null) _overlay.Reminder = "";
+            EndCountdown();
+            TimerReminderText.Text = "";
+            TimerCaption.Text = _settings.Language == "vi" ? "THỜI GIAN CÒN LẠI" : "TIME REMAINING";
             StartRecording();
+            UpdateSoloTimer();
         };
         _countdown.Start();
         SetState(RunState.Countdown);
@@ -421,7 +426,8 @@ public partial class MainWindow : Window
 
     private void ShowCountdown()
     {
-        _overlay!.Seconds = _countdownLeft;
+        TimerText.Text = _countdownLeft.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        TimerReminderText.Text = _t.StandStill;
         int left = _countdownLeft;
         SetStatus(t => t.CountdownStatus(left));
     }
@@ -433,41 +439,41 @@ public partial class MainWindow : Window
         SetState(RunState.Idle, t => t.Cancelled);
     }
 
-    private void EndCountdown(bool closeOverlay = true)
+    private void EndCountdown()
     {
         _countdown?.Stop();
         _countdown = null;
-        if (closeOverlay)
-        {
-            _overlay?.Close();
-            _overlay = null;
-        }
     }
 
     private void UpdateSoloTimer()
     {
         if (!_sessionTimer.IsEnabled) return;
         double remainingMs = RoundTiming.TotalDurationMs - _soloSessionClock.Elapsed.TotalMilliseconds;
-        if (_state != RunState.Countdown && _overlay is not null)
+        if (_state == RunState.Countdown)
         {
-            _overlay.Reminder = "";
-            _overlay.Text = FormatTimer(remainingMs);
+            if (remainingMs <= 0) CancelCountdown();
+            return;
         }
+
+        TimerCaption.Text = _settings.Language == "vi" ? "THỜI GIAN CÒN LẠI" : "TIME REMAINING";
+        TimerReminderText.Text = "";
+        TimerPanel.Visibility = Visibility.Visible;
+        TimerText.Text = FormatTimer(remainingMs);
         if (remainingMs > 0) return;
 
-        StopSoloTimer();
-        if (_state == RunState.Countdown)
-            CancelCountdown();
-        else if (_run is not null && (_state is RunState.Starting or RunState.Recording))
+        // Stop once, through the existing CaptureRun.Stop/finalization path.
+        if (_run is not null && (_state is RunState.Starting or RunState.Recording))
             StopRecording();
+        else
+            StopSoloTimer();
     }
 
     private void StopSoloTimer()
     {
         _sessionTimer.Stop();
         _soloSessionClock.Stop();
-        _overlay?.Close();
-        _overlay = null;
+        TimerPanel.Visibility = Visibility.Collapsed;
+        TimerReminderText.Text = "";
     }
 
     private static string FormatTimer(double remainingMs)
@@ -831,9 +837,9 @@ public partial class MainWindow : Window
         {
             CloseRoomTimer();
             _roomTimerSessionId = sessionId;
-            var overlay = new CountdownOverlay();
-            _roomTimerOverlay = overlay;
-            overlay.Show();
+            TimerPanel.Visibility = Visibility.Visible;
+            TimerCaption.Text = _settings.Language == "vi" ? "CHUẨN BỊ GHI HÌNH" : "PREPARING RECORDING";
+            TimerReminderText.Text = _t.StandStill;
 
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
             _roomTimer = timer;
@@ -849,13 +855,17 @@ public partial class MainWindow : Window
                 if (countdownMs > 0 && countdownRemainingMs > 0)
                 {
                     int left = Math.Max(1, (int)Math.Ceiling(countdownRemainingMs / 1000.0));
-                    overlay.Seconds = left;
-                    overlay.Reminder = _t.StandStill;
+                    TimerCaption.Text = _settings.Language == "vi" ? "BẮT ĐẦU SAU" : "STARTING IN";
+                    TimerText.Text = left.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    TimerReminderText.Text = _t.StandStill;
                     return;
                 }
-                overlay.Reminder = "";
                 double remainingMs = deadlineLocalUtcMs - nowUtcMs;
-                overlay.Text = FormatTimer(remainingMs);
+                TimerCaption.Text = remainingMs > 0
+                    ? (_settings.Language == "vi" ? "THỜI GIAN CÒN LẠI" : "TIME REMAINING")
+                    : (_settings.Language == "vi" ? "ĐANG CHỜ MÁY CHỦ KẾT THÚC ROUND" : "WAITING FOR SERVER TO END ROUND");
+                TimerReminderText.Text = "";
+                TimerText.Text = FormatTimer(remainingMs);
             }
             timer.Tick += (_, _) => Update();
             timer.Start();
@@ -871,33 +881,9 @@ public partial class MainWindow : Window
         _roomTimerCancellation.Dispose();
         _roomTimer?.Stop();
         _roomTimer = null;
-        _roomTimerOverlay?.Close();
-        _roomTimerOverlay = null;
         _roomTimerSessionId = null;
-    }
-
-    /// <summary>The legacy countdown hook remains available to non-UI consumers.</summary>
-    private void ShowAgentCountdown(int countdownMs, CancellationToken cancelled)
-    {
-        int left = (int)Math.Ceiling(countdownMs / 1000.0);
-        var overlay = new CountdownOverlay { Seconds = left };
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(countdownMs / (double)left) };
-        bool closed = false;
-        void End()
-        {
-            if (closed) return;
-            closed = true;
-            timer.Stop();
-            overlay.Close();
-        }
-        timer.Tick += (_, _) =>
-        {
-            if (--left > 0) overlay.Seconds = left;
-            else End();
-        };
-        cancelled.Register(() => Dispatcher.BeginInvoke(End));
-        overlay.Show();
-        timer.Start();
+        TimerPanel.Visibility = Visibility.Collapsed;
+        TimerReminderText.Text = "";
     }
 
     /// <summary>AgentClient calls this off the UI thread when the orchestrator starts a round.</summary>
