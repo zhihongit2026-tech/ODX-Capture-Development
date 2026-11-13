@@ -119,9 +119,9 @@ public sealed class ResourceGuardTests
         for (int i = 11; i <= 16; i++)
             guard.Observe(new ResourceSnapshot(70, 40, 60), t.AddSeconds(i));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_CPU");
-        guard.Expire(t.AddSeconds(21));
+        guard.Expire(t.AddSeconds(20));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_CPU");
-        guard.Expire(t.AddSeconds(22));
+        guard.Expire(t.AddSeconds(21));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_CPU");
     }
 }
