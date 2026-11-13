@@ -322,6 +322,42 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     public Task ToggleRoundAsync(int countdownMs, CancellationToken stop, string? sessionId = null) =>
         SendAsync(new ToggleRound(countdownMs, sessionId), stop);
 
+    /// <summary>
+    /// Reports that this participant lost game focus during the specified active round.
+    /// The orchestrator, not the client, decides the common Party stop timestamp.
+    /// Returns false if the round is no longer active here or the signal could not be sent.
+    /// </summary>
+    public async Task<bool> ReportFocusLostAsync(string sessionId, CancellationToken stop)
+    {
+        bool active;
+        lock (_gate) active = _run is not null && _runSessionId == sessionId;
+        if (!active || !ToggleRound.IsValidSessionId(sessionId)) return false;
+
+        var socket = _socket;
+        if (socket is not { State: WebSocketState.Open })
+        {
+            StopCapture();
+            return false;
+        }
+
+        try
+        {
+            await SendAsync(new FocusLost(sessionId), stop);
+            if (socket.State == WebSocketState.Open) return true;
+        }
+        catch (WebSocketException)
+        {
+        }
+        catch (OperationCanceledException) when (!stop.IsCancellationRequested)
+        {
+        }
+
+        // Network loss must not leave this machine recording indefinitely. The remaining Party members
+        // will be stopped by the orchestrator's existing reconnect-grace handling if the signal cannot arrive.
+        StopCapture();
+        return false;
+    }
+
     public async Task LeaveRoomAsync(CancellationToken stop)
     {
         await SendAsync(new LeaveRoom(), stop);
