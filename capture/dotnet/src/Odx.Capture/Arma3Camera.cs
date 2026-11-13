@@ -7,7 +7,7 @@ public sealed record Arma3CameraRow(double TQpcMs, string View, Vec3 Position, V
     double ObjectFov);
 
 /// <summary>Live Arma 3 telemetry appended by the updated @OdxCapture addon.</summary>
-public sealed record Arma3GuardSample(double TQpcMs, double GameFps, Vec3 PlayerPosition, double PlayerSpeedMps,
+public sealed record Arma3GuardSample(double TQpcMs, string CameraView, double GameFps, Vec3 PlayerPosition, double PlayerSpeedMps,
     string CommandMenu, bool ActionMenu, int VisibleTeammates, int TotalTeammates, bool PlayerAlive, long SampleId);
 
 /// <summary>
@@ -111,7 +111,7 @@ public static class Arma3Camera
             }
 
             """);
-        WriteGuardTelemetry(captureDir, rows);
+        WriteGuardTelemetry(captureDir);
         return null;
     }
 
@@ -119,11 +119,12 @@ public static class Arma3Camera
     public static Arma3GuardSample? ParseGuardSample(string line)
     {
         var fields = line.Split(',');
-        if (fields.Length != Header.Length) return null;
+        if (fields.Length != Header.Length || fields[0] == "t_qpc_ms" || fields[16].Length == 0 || fields[26].Length == 0) return null;
         double D(int index) => Frames.ParseDouble(fields[index]);
         int I(int index) => int.Parse(fields[index], System.Globalization.CultureInfo.InvariantCulture);
         bool B(int index) => fields[index] == "1";
-        return new Arma3GuardSample(D(0), D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
+        if (long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture) == 0) return null;
+        return new Arma3GuardSample(D(0), fields[1], D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
             B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture));
     }
 
@@ -131,7 +132,7 @@ public static class Arma3Camera
         File.ReadLines(path).Where(line => line.Length > 0 && line.Trim() != EndLine)
             .Select(ParseGuardSample).Where(sample => sample is not null).Cast<Arma3GuardSample>().ToArray();
 
-    private static void WriteGuardTelemetry(string captureDir, IReadOnlyList<Arma3CameraRow> rows)
+    private static void WriteGuardTelemetry(string captureDir)
     {
         string source = CaptureFolder.Raw(captureDir, RawLog);
         var samples = ReadGuardSamples(source);
