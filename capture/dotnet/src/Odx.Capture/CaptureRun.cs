@@ -229,8 +229,13 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
 
     private void StartArma3GuardMonitor()
     {
-        if (_arma3Control is null) return;
         var evaluator = new Arma3GuardEvaluator();
+        if (_arma3Control is null)
+        {
+            var unavailable = evaluator.MarkTelemetryUnavailable(DateTime.UtcNow);
+            PublishGameAlerts(unavailable.Alerts);
+            return;
+        }
         var monitor = new Arma3GuardMonitor();
         var guardStop = new CancellationTokenSource();
         _arma3GuardStop = guardStop;
