@@ -1,0 +1,3 @@
+services:
+  orchestrator:
+    image: odx-orchestrator:0.3.5-smartguard-g11
