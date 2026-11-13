@@ -4,7 +4,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Threading;
 using Odx.Agent;
 using Odx.Capture;
@@ -19,7 +18,8 @@ public sealed record SourceItem(string Label, string? Process)
     public override string ToString() => Label;  // what screen readers announce
 }
 
-public sealed record GameItem(string Label, string? Path, string? WindowProcess = null)
+/// <param name="Game">The profile's game_title, what a room opened with this choice plays; null for no profile.</param>
+public sealed record GameItem(string Label, string? Path, string? WindowProcess = null, string? Game = null)
 {
     public override string ToString() => Label;
 }
@@ -33,10 +33,12 @@ public sealed record ObsCheck(string Version, int Width, int Height, double Fps,
 
 public partial class MainWindow : Window
 {
-    private const int WM_HOTKEY = 0x0312;
-    private const int HotkeyId = 1;
-    private const uint MOD_NOREPEAT = 0x4000;
+    // A low-level keyboard hook, not RegisterHotKey: Raw Input games (Arma 3's RIDEV_NOHOTKEYS) stop RegisterHotKey hotkeys
+    // reaching us while they are in the foreground, but a WH_KEYBOARD_LL hook sits below Raw Input and still fires.
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104, WM_KEYUP = 0x0101, WM_SYSKEYUP = 0x0105;
     private const int CountdownSeconds = 3;
+    private static readonly TimeSpan AutoStopAfter = TimeSpan.FromSeconds(235);
 
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly CaptureConfig _config;
@@ -48,13 +50,25 @@ public partial class MainWindow : Window
     private Strings _t = Strings.En;
     /// <summary>Renders the status line; kept so a language switch re-renders it.</summary>
     private Func<Strings, string> _status = t => t.Ready;
-    private IntPtr _hwnd;
+    private IntPtr _hook;
+    private LowLevelKeyboardProc? _hookProc;
+    /// <summary>Set while the hotkey box is being rebound, so the pressed combination assigns instead of toggling.</summary>
+    private bool _hotkeySuspended;
+    /// <summary>The hotkey is down, so auto-repeat keydowns don't toggle more than once per press.</summary>
+    private bool _hotkeyDown;
     private RunState _state = RunState.Idle;
     private CaptureRun? _run;
     private DispatcherTimer? _countdown;
     private CountdownOverlay? _overlay;
     private int _countdownLeft;
     private DateTime _runStarted;
+    private CancellationTokenSource? _autoStop;
+    private CancellationTokenSource? _roomAutoStop;
+    private string? _roomAutoStopSession;
+    private QualityGuard? _qualityGuard;
+    private RecorderStatus? _lastQualityStatus;
+    private DateTime? _lastQualityStatusAtUtc;
+    private SmartGuardOverlay? _smartGuardOverlay;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -102,7 +116,7 @@ public partial class MainWindow : Window
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
-        _clock.Tick += (_, _) => ShowRecordingStatus();
+        _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); };
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -177,9 +191,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        _hwnd = new WindowInteropHelper(this).Handle;
-        HwndSource.FromHwnd(_hwnd).AddHook(WndProc);
-        RegisterHotkey();
+        InstallHook();
     }
 
     protected override void OnStateChanged(EventArgs e)
@@ -205,20 +217,13 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        UnregisterHotKey(_hwnd, HotkeyId);
+        CancelAutoStop();
+        CancelRoomAutoStop();
+        StopQualityGuard();
+        if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
         _tray.Dispose();
         _packets.Dispose();
         base.OnClosed(e);
-    }
-
-    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg == WM_HOTKEY && wParam.ToInt32() == HotkeyId)
-        {
-            Toggle();
-            handled = true;
-        }
-        return IntPtr.Zero;
     }
 
     /// <summary>Also called when the app is started a second time (App: single instance).</summary>
@@ -250,7 +255,7 @@ public partial class MainWindow : Window
                 try
                 {
                     var profile = GameProfile.Load(file);
-                    items.Add(new GameItem(profile.GameTitle, file, profile.WindowProcess));
+                    items.Add(new GameItem(profile.GameTitle, file, profile.WindowProcess, profile.GameTitle));
                 }
                 catch (Exception e) when (e is IOException or FormatException or System.Text.Json.JsonException)
                 {
@@ -259,7 +264,17 @@ public partial class MainWindow : Window
                 }
             }
         if (_settings.GameProfile is string saved && File.Exists(saved) && !items.Any(i => i.Path == saved))
-            items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved));
+        {
+            string? game = null;
+            try
+            {
+                game = GameProfile.Load(saved).GameTitle;
+            }
+            catch (Exception e) when (e is IOException or FormatException or System.Text.Json.JsonException)
+            {
+            }
+            items.Add(new GameItem(Path.GetFileNameWithoutExtension(saved), saved, Game: game));
+        }
         GameBox.ItemsSource = items;
         GameBox.SelectedItem = items.FirstOrDefault(i => i.Path == _settings.GameProfile) ?? items[0];
     }
@@ -337,7 +352,10 @@ public partial class MainWindow : Window
     {
         _state = state;
         if (status is not null) SetStatus(status);
-        if (state != RunState.Recording) _clock.Stop();
+        bool capturing = state == RunState.Recording || state == RunState.Agent && _run is not null;
+        if (!capturing) _clock.Stop();
+        else if (_run is not null && !_clock.IsEnabled) _clock.Start();
+        if (state is RunState.Idle or RunState.Stopping) CancelAutoStop();
         bool idle = state == RunState.Idle;
         StartStopButton.Content = state switch
         {
@@ -378,7 +396,7 @@ public partial class MainWindow : Window
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
         CreateButton.IsEnabled = idle || inRoom && _agent!.IsHost;
         CreateButton.Visibility = inRoom && !_agent!.IsHost ? Visibility.Collapsed : Visibility.Visible;
-        // In a room the orchestrator's game profile and frame rate apply.
+        // In a room the host's game (chosen here before opening it) and the orchestrator's frame rate apply.
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
@@ -447,7 +465,9 @@ public partial class MainWindow : Window
         {
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
+            StartQualityGuard(run, _settings.WindowProcess ?? (GameBox.SelectedItem as GameItem)?.WindowProcess);
             SetState(RunState.Recording);
+            ScheduleAutoStop(run);
             _clock.Start();
             ShowRecordingStatus();
         }), TaskContinuationOptions.OnlyOnRanToCompletion);
@@ -494,14 +514,95 @@ public partial class MainWindow : Window
             SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
+    private void StartQualityGuard(CaptureRun run, string? gameProcess)
+    {
+        StopQualityGuard();
+        _qualityGuard = new QualityGuard(_settings.Fps);
+        _lastQualityStatus = null;
+        _lastQualityStatusAtUtc = null;
+        // WDA_EXCLUDEFROMCAPTURE is verified for Windows.Graphics.Capture. OBS can use
+        // Display Capture or injected Game Capture paths that may still include foreign overlays.
+        // Fail closed in OBS mode rather than risk contaminating the recorded video.
+        if (!_settings.RecordWithObs && !string.IsNullOrWhiteSpace(gameProcess))
+        {
+            _smartGuardOverlay = new SmartGuardOverlay();
+            _smartGuardOverlay.UpdateAlerts([]);
+            _smartGuardOverlay.Start(gameProcess);
+        }
+    }
+
+    private void PollQualityGuard()
+    {
+        if (_qualityGuard is not { } guard || _run is not { } run) return;
+        var status = run.LastStatus;
+        if (status is not null && !ReferenceEquals(status, _lastQualityStatus))
+        {
+            var now = DateTime.UtcNow;
+            guard.Observe(status, now);
+            _lastQualityStatus = status;
+            _lastQualityStatusAtUtc = now;
+        }
+        guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
+        _smartGuardOverlay?.UpdateAlerts(guard.Alerts);
+        if (guard.Alerts.Count > 0)
+        {
+            string message = string.Join(" | ", guard.Alerts.Select(a => a.Title + ": " + a.Detail));
+            SetStatus(_ => message);
+        }
+    }
+
+    private void StopQualityGuard()
+    {
+        _qualityGuard = null;
+        _lastQualityStatus = null;
+        _lastQualityStatusAtUtc = null;
+        if (_smartGuardOverlay is { } overlay)
+        {
+            overlay.Close();
+            _smartGuardOverlay = null;
+        }
+    }
+
+    private void CancelAutoStop()
+    {
+        var previous = _autoStop;
+        _autoStop = null;
+        previous?.Cancel();
+    }
+
+    private void ScheduleAutoStop(ICaptureRun run)
+    {
+        CancelAutoStop();
+        var cancellation = new CancellationTokenSource();
+        _autoStop = cancellation;
+        _ = AutoStopAsync(run, cancellation.Token);
+    }
+
+    private async Task AutoStopAsync(ICaptureRun run, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(AutoStopAfter, cancellation);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!cancellation.IsCancellationRequested && ReferenceEquals(_run, run) && _state == RunState.Recording)
+                    StopRecording();
+            });
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private void StopRecording()
     {
+        CancelAutoStop();
         SetState(RunState.Stopping, t => t.StoppingStatus);
         _run!.Stop();
     }
 
     private void OnRunCompleted(RunResult result)
     {
+        CancelAutoStop();
+        StopQualityGuard();
         _run = null;
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
@@ -568,7 +669,7 @@ public partial class MainWindow : Window
         }
         var room = new RoomSession(new AgentOptions(orchestrator, _settings.PlayerId, _settings.PlayerName, PackageFolders.Captures,
             _settings.WindowProcess, RoomCode: code, CreateRoom: code is null, AccessKey: _config.AccessKey, Lan: lan,
-            TimeServer: _config.TimeServer),
+            TimeServer: _config.TimeServer, Game: code is null ? (GameBox.SelectedItem as GameItem)?.Game : null),
             StartAgentCapture, _packets.GetAsync, _log, _settings.RecordAudio && !_settings.RecordWithObs);
         var agent = room.Agent;
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
@@ -606,10 +707,12 @@ public partial class MainWindow : Window
             if (_room != room) return;
             if (update is null)
             {
+                CancelRoomAutoStop();
                 Disconnect(t => t.RoomClosed);
                 return;
             }
             RoomBox.Text = update.Code;
+            UpdateRoomAutoStop(room, update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
         });
@@ -666,8 +769,55 @@ public partial class MainWindow : Window
     private static readonly string ZeroTierTray =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ZeroTier", "One", "zerotier_desktop_ui.exe");
 
+    // Host-side safety timer, compatible with the deployed orchestrator: host sends the existing
+    // ToggleRound stop command so the server broadcasts one common Stop to every room member.
+    private void UpdateRoomAutoStop(RoomSession room, RoomUpdate update)
+    {
+        if (!room.Agent.IsHost || update.CurrentSession is null)
+        {
+            CancelRoomAutoStop();
+            return;
+        }
+        if (update.Countdown) return; // The 3-2-1 countdown is not part of the 235 seconds.
+        if (_roomAutoStopSession == update.CurrentSession) return;
+        CancelRoomAutoStop();
+        string session = update.CurrentSession;
+        var cancellation = new CancellationTokenSource();
+        _roomAutoStopSession = session;
+        _roomAutoStop = cancellation;
+        _ = StopRoomAfter235Async(room, session, cancellation.Token);
+    }
+
+    private async Task StopRoomAfter235Async(RoomSession room, string session, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(AutoStopAfter, cancellation);
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                if (cancellation.IsCancellationRequested || _room != room ||
+                    room.Agent.Room is not { CurrentSession: var current } || current != session ||
+                    !room.Agent.IsHost) return;
+                try { await room.ToggleRoundAsync(0); }
+                catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
+                {
+                    SetStatus(t => t.RoundToggleFailed(e.Message));
+                }
+            });
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void CancelRoomAutoStop()
+    {
+        _roomAutoStop?.Cancel();
+        _roomAutoStop = null;
+        _roomAutoStopSession = null;
+    }
+
     private async void LeaveRoom()
     {
+        CancelRoomAutoStop();
         if (_room is { } room)
         {
             _room = null;  // its RoomChanged(null) is ours, not the host's
@@ -679,6 +829,7 @@ public partial class MainWindow : Window
 
     private async void CloseRoom()
     {
+        CancelRoomAutoStop();
         if (_room is { } room)
         {
             _room = null;
@@ -690,6 +841,7 @@ public partial class MainWindow : Window
 
     private void Disconnect(Func<Strings, string> status)
     {
+        CancelRoomAutoStop();
         _room?.Dispose();
         _room = null;
         if (_run is null) SetState(RunState.Idle, status);
@@ -714,7 +866,7 @@ public partial class MainWindow : Window
         var clock = session.Agent.Clock;
         bool clockOff = _config.TimeServer is not null && clock is { Ok: false, NtpError: null };
         SyncClockButton.Visibility = clockOff && !_syncingClock ? Visibility.Visible : Visibility.Collapsed;
-        SetStatus(t => t.RoomStatus(room.Code, host, members) + (round is null ? "" : "\n" + round(t)) +
+        SetStatus(t => t.RoomStatus(room.Code, room.Game, host, members) + (round is null ? "" : "\n" + round(t)) +
                        (_config.TimeServer is null ? "" : "\n" + (_syncingClock ? t.ClockSyncing : t.ClockLine(clock))) +
                        (session.Agent.Capture is { } capture ? "\n" + t.CaptureLine(capture) +
                                                                (capture.Audio is { } audio ? "\n" + t.AudioLine(audio) : "") : "") +
@@ -801,6 +953,7 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
+            StartQualityGuard(run, options.WindowProcess);
             _clock.Start();
             ShowRecordingStatus();
         });
@@ -813,6 +966,7 @@ public partial class MainWindow : Window
 
     private void OnAgentRunCompleted(RunResult result)
     {
+        StopQualityGuard();
         _run = null;
         _clock.Stop();
         // The notice comes once the capture is built (RoundKept).
@@ -868,14 +1022,14 @@ public partial class MainWindow : Window
     // instead of toggling a recording.
     private void Hotkey_GotFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
-        UnregisterHotKey(_hwnd, HotkeyId);
+        _hotkeySuspended = true;
         HotkeyBox.Text = _t.PressKeys;
     }
 
     private void Hotkey_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
         HotkeyBox.Text = _settings.Hotkey.ToString();
-        RegisterHotkey();
+        _hotkeySuspended = false;
     }
 
     private void Hotkey_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -891,16 +1045,63 @@ public partial class MainWindow : Window
         StartStopButton.Focus();
     }
 
-    private void RegisterHotkey()
+    private void InstallHook()
     {
-        var hk = _settings.Hotkey;
-        if (!RegisterHotKey(_hwnd, HotkeyId, (uint)hk.Modifiers | MOD_NOREPEAT, (uint)hk.VirtualKey))
-            SetStatus(t => t.HotkeyInUse(hk.ToString()));
+        _hookProc = HookProc;  // kept in a field so the delegate is not collected while the hook is live
+        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc, GetModuleHandle(null), 0);
+        if (_hook == IntPtr.Zero) SetStatus(t => t.HotkeyInUse(_settings.Hotkey.ToString()));
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && !_hotkeySuspended)
+        {
+            int msg = wParam.ToInt32();
+            var hk = _settings.Hotkey;
+            bool match = Marshal.ReadInt32(lParam) == hk.VirtualKey && CurrentModifiers() == hk.Modifiers;
+            if (match && msg is WM_KEYDOWN or WM_SYSKEYDOWN)
+            {
+                if (!_hotkeyDown)
+                {
+                    _hotkeyDown = true;
+                    Dispatcher.BeginInvoke(Toggle);
+                }
+                return 1;  // swallow so the key does not reach the game (the hotkey is never a gameplay binding)
+            }
+            if (match && msg is WM_KEYUP or WM_SYSKEYUP)
+            {
+                _hotkeyDown = false;
+                return 1;
+            }
+        }
+        return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+
+    private static HotkeyModifiers CurrentModifiers()
+    {
+        static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+        var mods = HotkeyModifiers.None;
+        if (Down(0x11)) mods |= HotkeyModifiers.Ctrl;   // VK_CONTROL
+        if (Down(0x10)) mods |= HotkeyModifiers.Shift;  // VK_SHIFT
+        if (Down(0x12)) mods |= HotkeyModifiers.Alt;    // VK_MENU
+        if (Down(0x5B) || Down(0x5C)) mods |= HotkeyModifiers.Win;  // VK_LWIN / VK_RWIN
+        return mods;
+    }
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
 }
