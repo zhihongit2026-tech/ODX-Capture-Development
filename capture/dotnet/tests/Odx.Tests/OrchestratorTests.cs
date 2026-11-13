@@ -183,9 +183,10 @@ public sealed class OrchestratorTests : IAsyncLifetime
     }
 
     /// <summary>Opens a room hosted by <paramref name="host"/> (for <paramref name="game"/>, else the default) and returns its invite code.</summary>
-    private async Task<(AgentClient Host, TaskCompletionSource Started, string Code)> HostRoom(string host, string? game = null)
+    private async Task<(AgentClient Host, TaskCompletionSource Started, string Code)> HostRoom(string host, string? game = null,
+        string? template = null)
     {
-        var (agent, started) = Connect(null, host, null, game: game);
+        var (agent, started) = Connect(template, host, null, game: game);
         for (int i = 0; i < 100 && agent.Room is null; i++) await Task.Delay(50);
         return (agent, started, agent.Room?.Code ?? throw new TimeoutException("no room opened"));
     }
@@ -599,6 +600,55 @@ public sealed class OrchestratorTests : IAsyncLifetime
         var (_, report) = await session;
         Assert.Equal(2, report.Players.Count);
         Assert.All(report.Players, p => Assert.Contains(p.Issues, i => i.Message == "no game window"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FocusLossFromAnyPartyMemberStopsEveryParticipantAtOneEndTimestamp(bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "focus-template"));
+        var (host, hostStarted, code) = await HostRoom("p1", template: template);
+        var (member, memberStarted) = Connect(template, "p2", code);
+        await WaitForAgents(2, code);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            if (room["members"]!.AsArray().All(m => (string?)m!["player_id"] == "p1" || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
+
+        var completed = NextSession();
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
+
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        AgentClient reporter = hostTriggers ? host : member;
+        Assert.True(await reporter.ReportFocusLostAsync(sessionId!, default));
+
+        var result = await completed.WaitAsync(TimeSpan.FromSeconds(15));
+        var record = RoundRecord.Load(result.Dir);
+        Assert.Equal("focus_lost", record.EndReason);
+        Assert.NotNull(record.EndUtcMs);
+        Assert.Equal(2, record.Players.Count);
+        var hostTimes = FakeCapture.RoundTimes["p1"];
+        var memberTimes = FakeCapture.RoundTimes["p2"];
+        Assert.NotNull(hostTimes.End);
+        Assert.NotNull(memberTimes.End);
+        Assert.Equal(hostTimes.End, memberTimes.End);
+        Assert.Equal(record.EndUtcMs, hostTimes.End);
+        Assert.Equal(record.EndUtcMs, memberTimes.End);
     }
 
     [Fact]
