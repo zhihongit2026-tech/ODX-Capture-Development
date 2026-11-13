@@ -483,8 +483,9 @@ public partial class MainWindow : Window
         {
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
-            StartQualityGuard(run, _settings.WindowProcess ?? (GameBox.SelectedItem as GameItem)?.WindowProcess);
             SetState(RunState.Recording);
+            StartQualityGuard(run, _settings.WindowProcess ?? (GameBox.SelectedItem as GameItem)?.WindowProcess);
+            AttachGameGuard(run, solo: true);
             ScheduleAutoStop(run);
             _clock.Start();
             ShowRecordingStatus();
@@ -680,6 +681,56 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AttachGameGuard(ICaptureRun run, bool solo)
+    {
+        if (run is not IGameGuardCaptureRun gameGuard) return;
+
+        void Refresh(IReadOnlyList<QualityAlert> alerts)
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!ReferenceEquals(_run, run)) return;
+                    var merged = (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(alerts).ToArray();
+                    _smartGuardOverlay?.UpdateAlerts(merged);
+                    var actionable = alerts.Where(a => a.Severity != QualityAlertSeverity.Info).ToArray();
+                    if (actionable.Length > 0)
+                        SetStatus(_ => string.Join(" | ", actionable.Select(a => a.Title + ": " + a.Detail)));
+                }));
+            }
+            catch (InvalidOperationException) { }
+        }
+
+        void StopForMenu(string reason)
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!ReferenceEquals(_run, run)) return;
+                    var alert = gameGuard.GameAlerts.FirstOrDefault(a => a.Code == "ARMA3_COMMAND_MENU") ??
+                        new QualityAlert("ARMA3_COMMAND_MENU", QualityAlertSeverity.Critical,
+                            "Arma 3 đang mở MENU LỆNH", reason);
+                    _focusAlertAtUtc = DateTime.UtcNow;
+                    _qualityGuard?.SetExternalAlert(alert);
+                    _qualityGuard?.ResolveExternalAlert(alert.Code, _focusAlertAtUtc.Value);
+                    _smartGuardOverlay?.UpdateAlerts((_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameGuard.GameAlerts).ToArray());
+                    SetStatus(_ => reason);
+                    if (solo && _state is RunState.Starting or RunState.Recording) StopRecording();
+                }));
+            }
+            catch (InvalidOperationException) { }
+        }
+
+        gameGuard.GameAlertsChanged += Refresh;
+        gameGuard.GuardStopRequested += StopForMenu;
+        if (gameGuard.GameAlerts.Count > 0) Refresh(gameGuard.GameAlerts);
+        if (gameGuard.GuardStopReason is { } existingReason) StopForMenu(existingReason);
+    }
+
     private void PollQualityGuard()
     {
         if (_qualityGuard is not { } guard || _run is not { } run) return;
@@ -695,9 +746,10 @@ public partial class MainWindow : Window
             _lastQualityStatusAtUtc = statusAt;
         }
         guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
-        _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceAlerts).ToArray());
+        var gameAlerts = run is IGameGuardCaptureRun gameGuard ? gameGuard.GameAlerts : [];
+        _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceAlerts).Concat(gameAlerts).ToArray());
         ScheduleResourceSample(guard);
-        var allAlerts = guard.Alerts.Concat(_resourceAlerts).ToArray();
+        var allAlerts = guard.Alerts.Concat(_resourceAlerts).Concat(gameAlerts).ToArray();
         if (allAlerts.Length > 0)
         {
             string message = string.Join(" | ", allAlerts.Select(a => a.Title + ": " + a.Detail));
@@ -759,7 +811,7 @@ public partial class MainWindow : Window
         StopFocusMonitor();
         TimeSpan focusHold = TimeSpan.Zero;
         if (_focusAlertAtUtc is DateTime focusAt &&
-            _qualityGuard?.Alerts.Any(a => a.Code == "GAME_FOCUS_LOST") == true)
+            _qualityGuard?.Alerts.Any(a => a.Code is "GAME_FOCUS_LOST" or "ARMA3_COMMAND_MENU") == true)
             focusHold = TimeSpan.FromSeconds(5) - (DateTime.UtcNow - focusAt);
         _focusAlertAtUtc = null;
         _qualityGuard = null;
@@ -1197,6 +1249,7 @@ public partial class MainWindow : Window
             _roundResult = null;
             _runStarted = DateTime.Now;
             StartQualityGuard(run, options.WindowProcess, options.DirName);
+            AttachGameGuard(run, solo: false);
             _clock.Start();
             ShowRecordingStatus();
         });
