@@ -92,6 +92,7 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
     private volatile CapturePhase _phase = CapturePhase.Recording;
     private volatile int _finalizePercent;
     private readonly string? _gameProfile;
+    private readonly bool _isArma3Game;
     private readonly PlayerIdentity? _player;
     /// <summary>The round's session id when the agent runs this capture (its DirName); null for a capture outside a room.</summary>
     private readonly string? _sessionId;
@@ -137,7 +138,8 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
         _fps = options.Fps;
         Directory.CreateDirectory(SessionDir);
         var profile = TryLoadProfile(options.GameProfile);
-        if (profile?.CameraSource == Arma3Camera.Source)
+        _isArma3Game = profile?.CameraSource == Arma3Camera.Source;
+        if (_isArma3Game)
         {
             _arma3Control = Arma3Camera.ControlPath();
             try
@@ -229,6 +231,7 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
 
     private void StartArma3GuardMonitor()
     {
+        if (!_isArma3Game) return;  // Never display Arma 3 alerts for other games or generic screen capture.
         var evaluator = new Arma3GuardEvaluator();
         if (_arma3Control is null)
         {
