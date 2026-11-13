@@ -22,15 +22,15 @@ public sealed class QualityGuardTests
     }
 
     [Fact]
-    public void Low_fresh_frame_rate_is_reported_after_two_samples()
+    public void FPS_below_30_is_reported_immediately_but_30_is_not()
     {
         var guard = new QualityGuard(30);
         var t = DateTime.UtcNow;
         guard.Observe(Started(), t);
         guard.Observe(Progress(30), t.AddSeconds(1));
-        guard.Observe(Progress(50, duplicates: 10), t.AddSeconds(2));
+        guard.Observe(Progress(60), t.AddSeconds(2));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "FPS_DROP");
-        guard.Observe(Progress(70, duplicates: 20), t.AddSeconds(3));
+        guard.Observe(Progress(89), t.AddSeconds(3));
         Assert.Contains(guard.Alerts, a => a.Code == "FPS_DROP" && a.Severity == QualityAlertSeverity.Critical);
     }
 
@@ -56,8 +56,9 @@ public sealed class QualityGuardTests
         guard.Observe(Progress(30, dropped: 30), t.AddSeconds(1));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "FFMPEG_BACKPRESSURE");
         guard.Observe(Progress(60, starved: 6), t.AddSeconds(2));
-        guard.Observe(Progress(90, starved: 12), t.AddSeconds(3));
-        Assert.Contains(guard.Alerts, a => a.Code == "FFMPEG_BACKPRESSURE" && a.Severity == QualityAlertSeverity.Warning);
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "FFMPEG_BACKPRESSURE");
+        guard.Observe(Progress(90, starved: 21), t.AddSeconds(3));
+        Assert.Contains(guard.Alerts, a => a.Code == "FFMPEG_BACKPRESSURE" && a.Severity == QualityAlertSeverity.Critical);
     }
 
     [Fact]
@@ -78,6 +79,8 @@ public sealed class QualityGuardTests
         guard.CheckHeartbeat(t.AddSeconds(2.6), t);
         Assert.Contains(guard.Alerts, a => a.Code == "RECORDER_HEARTBEAT");
         guard.Observe(Progress(30), t.AddSeconds(3));
+        Assert.Contains(guard.Alerts, a => a.Code == "RECORDER_HEARTBEAT");
+        guard.Expire(t.AddSeconds(9));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "RECORDER_HEARTBEAT");
     }
 }
