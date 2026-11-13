@@ -68,6 +68,7 @@ public sealed partial class MatchCoordinator
         public List<OpenRound> Ended { get; } = [];
         public List<OpenRound> Cancelled { get; } = [];
         public OpenRound? Countdown { get; set; }
+        public OpenRound? Started { get; set; }
         public HashSet<Room> Changed { get; } = [];
         public List<(string Network, string Node)> LanRevoke { get; } = [];
         public List<string> LanDelete { get; } = [];
