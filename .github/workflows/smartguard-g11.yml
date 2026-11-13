@@ -1,0 +1,105 @@
+name: ODX Smart Guard G1.1 - Windows QA and Orchestrator Protocol 6
+on:
+  push:
+    branches: [feature/smart-ai-guard-g11-party-focus]
+  workflow_dispatch:
+jobs:
+  windows-qa:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - name: Install FFmpeg for regression fixtures
+        run: choco install ffmpeg -y --no-progress
+      - name: Build full .NET solution
+        working-directory: capture/dotnet
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
+      - name: Run complete .NET regression suite
+        working-directory: capture/dotnet
+        run: |
+          dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g11.trx"
+          if ($LASTEXITCODE -ne 0) { throw 'Regression tests failed' }
+      - name: Build native extractor regression suite
+        working-directory: capture/native/extractor
+        run: |
+          cmake -B build
+          cmake --build build --config Release
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Native extractor tests failed' }
+      - name: Assemble complete ODX 0.3.5 Windows x64 QA package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/trquoccuong/Game-Recorder/releases/download/capture-v0.3.5/odx-capture-0.3.5-win-x64.zip'
+          Invoke-WebRequest $url -OutFile baseline.zip
+          $hash = (Get-FileHash baseline.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'd67ff01452151bf571046cbf706eab5ad0b44a5c23f987f60ec88f8da0c15968') { throw "Original 0.3.5 release hash mismatch: $hash" }
+          Expand-Archive baseline.zip -DestinationPath extracted
+          $original = Join-Path (Get-Location) 'extracted/odx-capture-0.3.5-win-x64'
+          foreach ($rel in @('Odx Capture.exe','bin/odx.exe','bin/odx-capture.json','bin/ffmpeg/ffmpeg.exe')) {
+            if (-not (Test-Path (Join-Path $original $rel))) { throw "Baseline package missing $rel" }
+          }
+          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5-smartguard-g11 -o app-publish
+          if ($LASTEXITCODE -ne 0) { throw 'Smart Guard WPF publish failed' }
+          $app = Join-Path (Get-Location) 'app-publish/odx-app.exe'
+          if (-not (Test-Path $app)) { throw 'Patched odx-app.exe missing' }
+          Copy-Item $app (Join-Path $original 'bin/odx-app.exe') -Force
+          @(
+            'ODX Capture 0.3.5 - Smart Guard G1.1 QA - Windows x64',
+            'This package preserves the upstream capture-v0.3.5 launcher, CLI, FFmpeg and game assets; only bin/odx-app.exe is rebuilt from the Smart Guard branch.',
+            'F10 and the 235-second auto-stop are retained.',
+            'Party focus-loss synchronization uses Orchestrator protocol v6. Update the remote Orchestrator to the matching protocol-v6 image BEFORE using Party mode.',
+            'The included bin/odx-capture.json is the upstream template and does not contain your private access_key. Before running, copy your EXISTING bin/odx-capture.json from the currently working installation over this template. Do not share that file.',
+            'Do not overwrite or delete your existing data/ or captures/ folders. Extract to a new folder for QA.',
+            'G1.1 includes focus-loss Party stop signaling, CPU/RAM/GPU telemetry where supported, threshold alerts, five-second recovery hold and UniKey/VietKey preflight/warnings.',
+            'Arma 3 HUD recognition/auto-hide and teammate/camera AI are not yet included in this G1.1 QA build.'
+          ) | Set-Content -Path (Join-Path $original 'README-SMART-GUARD-G11.txt') -Encoding UTF8
+          $dest = 'odx-capture-0.3.5-smartguard-g11-win-x64'
+          Move-Item $original $dest
+          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
+          $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
+          @("odx-app.exe SHA256: $exeHash","package ZIP SHA256: $zipHash") | Set-Content -Path SHA256SUMS.txt -Encoding ASCII
+          Write-Host "EXE SHA256: $exeHash"
+          Write-Host "ZIP SHA256: $zipHash"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-SmartGuard-G1.1-Windows-x64
+          path: |
+            odx-capture-0.3.5-smartguard-g11-win-x64.zip
+            SHA256SUMS.txt
+            capture/deploy/SMART_GUARD_G11_DEPLOY.md
+            capture/deploy/compose.protocol6.yaml
+          if-no-files-found: error
+          retention-days: 30
+
+  orchestrator-protocol6:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux orchestrator image
+        run: |
+          docker build --pull -t odx-orchestrator:0.3.5-smartguard-g11 -f capture/deploy/Dockerfile capture
+          docker image inspect odx-orchestrator:0.3.5-smartguard-g11
+      - name: Export image for private server deployment
+        run: |
+          docker save odx-orchestrator:0.3.5-smartguard-g11 | gzip -1 > odx-orchestrator-protocol6-linux-x64.tar.gz
+          sha256sum odx-orchestrator-protocol6-linux-x64.tar.gz > ORCHESTRATOR-SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Orchestrator-Protocol6-Linux-x64
+          path: |
+            odx-orchestrator-protocol6-linux-x64.tar.gz
+            ORCHESTRATOR-SHA256.txt
+            capture/deploy/SMART_GUARD_G11_DEPLOY.md
+            capture/deploy/compose.protocol6.yaml
+          if-no-files-found: error
+          retention-days: 30
