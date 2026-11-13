@@ -53,7 +53,7 @@ Implementation and interpretation:
 - [ ] GPU Encode load alone is not a fault; require encoder starvation/backpressure.
 - [ ] Use supported driver telemetry (for example NVML/vendor APIs) for VRAM and temperature. If unavailable/access denied, show “unavailable/not supported”, never a false zero.
 - [ ] Resource Guard is advisory: high CPU/RAM/GPU alone must not stop recording or the Party.
-- [ ] VRAM threshold dwell time (how long 90%/95% must persist) was not specified in the approved threshold table and must be finalized before implementing VRAM alerts.
+- [ ] VRAM threshold dwell time was not specified in the approved table; G1.1 implementation evaluates the approved 90%/95% threshold on each once-per-second sample and applies the common five-second recovery hold.
 
 ## 3. Focus Guard - any member Alt+Tab stops the whole Party
 
@@ -185,24 +185,30 @@ Rules:
 - [ ] Provide package link, version, SHA-256, change summary, install/upgrade steps, and rollback instructions.
 - [ ] Do not call a feature PASS solely because it compiles or CI passes. Runtime acceptance is required for overlay exclusion, Alt+Tab Party stop, HUD/camera detection, and real GPU telemetry.
 
-## 13. Current implementation audit (as of this checklist update)
+## 13. Current implementation audit (after G1.1 implementation pass)
 
-### Present in the current G1/G1.1 branch, but still requires runtime acceptance
-- Basic QualityGuard rules for fresh FPS <30, FFmpeg starvation >=25%, duplicate/no-new-frame detection, recorder heartbeat, and 5-second recovery hold.
-- Basic WPF click-through overlay that follows the selected game window and attempts Windows capture exclusion.
-- Common UniKey/VietKey process-name warning.
-- Initial focus monitoring code.
+### Implemented in the current G1.1 branch; CI build/tests must remain green
+- Basic QualityGuard: fresh FPS below 30, FFmpeg starvation/backpressure >=25%, duplicate/no-new-frame stall, FFmpeg/recorder errors, and missing heartbeat.
+- ResourceGuard threshold engine for system CPU/RAM, GPU 3D, GPU Video Encode, dedicated VRAM and GPU temperature; one-second sampling and five-second recovery/alert hold.
+- Windows telemetry provider: CPU via GetSystemTimes; RAM via GlobalMemoryStatusEx; GPU 3D/Video Encode and dedicated adapter memory via PDH where available; NVIDIA encoder/VRAM/temperature via optional NVML. Unsupported sensors return unavailable/null, never fabricated zero.
+- Resource rules: GPU 3D alerts require FPS below 30; GPU Video Encode alerts require encoder starvation/backpressure. Resource pressure alone does not stop recording.
+- Focus monitoring on each recording client using a separate 100 ms worker timer; Host and non-Host send FocusLost for the active SessionId.
+- Protocol v6 FocusLost message; Orchestrator validates sender membership, active SessionId and starting/recording state, then ends the whole Party once with one server-stamped EndUtc using the existing Stop/finalize flow.
+- Orchestrator tests cover focus loss from Host and non-Host and assert both participants receive the same EndUtc.
+- UniKeyNT/UniKey/VietKeyNT/VietKey process detection; preflight blocks solo start, Party Ready and Host Party start while one is running; detection during recording warns without killing the process.
+- Basic WPF click-through/no-activate overlay that follows the selected game window; Windows capture exclusion must be confirmed before display. OBS mode remains fail-closed/disabled.
+- Deployment artifacts/workflow for a Linux x64 protocol-v6 Orchestrator image and Windows x64 G1.1 QA package.
 
-### Known gaps - not yet complete
-- The current focus-loss path is not yet a verified all-member signal to Orchestrator. The non-Host member signal, explicit protocol message/version update, server validation, and synchronized server-side EndRound behavior must be implemented and tested.
-- Current focus polling is tied to the UI/recording status timer; low-latency immediate detection needs a dedicated event-driven or <=100-250 ms path.
-- UniKey/VietKey preflight blocking is not complete; current detection/warning is not sufficient.
-- Resource Guard telemetry collection (CPU/RAM/GPU 3D/GPU Encode/VRAM/temperature) is not implemented; approved values above are requirements only.
-- Arma 3 HUD recognition/auto-hide and Party-wide HUD compliance are not implemented.
-- Game-specific teammate recognition, 1-2 teammate visibility checks, camera-profile enforcement, and camera-change detection are not implemented.
-- Party version/config preflight for Smart Guard, Camera Profile, HUD Profile, and resource/capture backend is not implemented.
-- Stop/retake workflow and automatic accepted/failed take separation/history are not implemented.
-- Overlay/audio exclusion has not yet been proven in real recordings across Windows Capture and OBS modes. OBS overlay is currently disabled as a fail-safe; do not claim OBS overlay support until verified.
-- Full runtime tests on actual game sessions, low-spec machines, and multiple Party members remain outstanding.
+### Still incomplete or requires real-machine/game-specific acceptance
+- Overlay exclusion has not yet been proven in a real captured MP4 for every supported Windows Graphics Capture/OBS mode. OBS overlay remains disabled until a test proves exclusion.
+- Real hardware validation is still required for PDH/NVML GPU counters, temperature, VRAM, and GPU-engine naming across supported driver versions.
+- Separate per-process CPU/RAM breakdown for ODX and FFmpeg is not yet displayed; current CPU/RAM thresholds are system-wide.
+- Arma 3 HUD recognition/auto-hide and Party-wide HUD compliance are not implemented. The current ODX Arma 3 mod captures camera telemetry but does not yet report HUD visibility.
+- Game-specific teammate recognition, teammate visibility at 1s/2s, camera-profile enforcement and camera-change detection are not implemented.
+- Party preflight comparison for Smart Guard/Game/Camera/HUD profiles, resolution, FPS target and FFmpeg version is not implemented beyond protocol compatibility.
+- Stop/Retake workflow, accepted/failed take separation and non-destructive attempt history are not implemented.
+- Optional alert sound isolation from game/system audio is not implemented.
+- Runtime tests on actual Arma 3 sessions, Party members on separate PCs, low-spec machines, fullscreen/borderless modes and actual server deployment remain outstanding.
+- Protocol-v6 Orchestrator image is built as a QA artifact but is not deployed to the user's remote server. Do not update the Windows clients for Party use until the matching server image is deployed; protocol v5 and v6 clients are incompatible.
 
-**Release gate:** Keep the known-working ODX 0.3.5 Auto235 build intact. No merge/release of Smart Guard until the applicable CI, regression, package, and real-machine acceptance items above pass.
+**Release gate:** Keep the known-working ODX 0.3.5 Auto235 build intact. No merge/release of Smart Guard until CI, regression, package, server rollout and real-machine acceptance pass.
