@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -69,6 +70,9 @@ public partial class MainWindow : Window
     private RecorderStatus? _lastQualityStatus;
     private DateTime? _lastQualityStatusAtUtc;
     private SmartGuardOverlay? _smartGuardOverlay;
+    private string? _focusLossSession;
+    private DateTime _lastFocusCheckUtc;
+    private static readonly string[] InputMethodProcesses = ["UniKeyNT", "UniKey", "VietKeyNT", "VietKey"];
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -514,6 +518,82 @@ public partial class MainWindow : Window
             SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
+    private void CheckGameFocusAndInputMethods()
+    {
+        if (_run is null || _state is not (RunState.Recording or RunState.Agent)) return;
+        string? processName = _settings.WindowProcess ?? (GameBox.SelectedItem as GameItem)?.WindowProcess;
+        if (!string.IsNullOrWhiteSpace(processName) && !IsSelectedGameForeground(processName))
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastFocusCheckUtc).TotalMilliseconds >= 250)
+            {
+                _lastFocusCheckUtc = now;
+                var alert = new QualityAlert("GAME_FOCUS_LOST", QualityAlertSeverity.Critical,
+                    "Đã rời cửa sổ game", "Phát hiện Alt+Tab hoặc cửa sổ game mất focus. Đang dừng lượt quay để bảo toàn dữ liệu.");
+                _smartGuardOverlay?.UpdateAlerts((_qualityGuard?.Alerts ?? []).Append(alert).ToArray());
+                if (_state == RunState.Agent && _agent?.IsHost == true &&
+                    _agent.Room is { CurrentSession: { } session } && _focusLossSession != session)
+                {
+                    _focusLossSession = session;
+                    _ = StopPartyForFocusLossAsync(session);
+                }
+                else if (_state == RunState.Recording)
+                    StopRecording();
+            }
+            return;
+        }
+        _focusLossSession = null;
+        var runningIme = InputMethodProcesses.FirstOrDefault(name => Process.GetProcessesByName(name).Length > 0);
+        if (runningIme is not null)
+        {
+            var alert = new QualityAlert("INPUT_METHOD_RUNNING", QualityAlertSeverity.Warning,
+                "Phát hiện bộ gõ tiếng Việt", $"Đang chạy {runningIme}.exe; hãy tắt trước khi tiếp tục ghi hình.");
+            _smartGuardOverlay?.UpdateAlerts((_qualityGuard?.Alerts ?? []).Append(alert).ToArray());
+        }
+    }
+
+    private async Task StopPartyForFocusLossAsync(string session)
+    {
+        try
+        {
+            if (_room?.Agent is { IsHost: true } agent && agent.Room?.CurrentSession == session)
+                await agent.ToggleRoundAsync(0, CancellationToken.None, session);
+        }
+        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
+        {
+            string error = e.Message;
+            Dispatcher.Invoke(() => SetStatus(t => t.RoundToggleFailed(error)));
+        }
+    }
+
+    private static bool IsSelectedGameForeground(string processName)
+    {
+        IntPtr foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(foreground, out uint foregroundPid);
+        try
+        {
+            using var foregroundProcess = Process.GetProcessById((int)foregroundPid);
+            if (string.Equals(foregroundProcess.ProcessName, Path.GetFileNameWithoutExtension(processName),
+                StringComparison.OrdinalIgnoreCase)) return true;
+            IntPtr root = GetAncestor(foreground, 2);
+            if (root != IntPtr.Zero)
+            {
+                GetWindowThreadProcessId(root, out uint rootPid);
+                using var rootProcess = Process.GetProcessById((int)rootPid);
+                return string.Equals(rootProcess.ProcessName, Path.GetFileNameWithoutExtension(processName),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
+        return false;
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
     private void StartQualityGuard(CaptureRun run, string? gameProcess)
     {
         StopQualityGuard();
@@ -534,6 +614,8 @@ public partial class MainWindow : Window
     private void PollQualityGuard()
     {
         if (_qualityGuard is not { } guard || _run is not { } run) return;
+        guard.Expire(DateTime.UtcNow);
+        CheckGameFocusAndInputMethods();
         var status = run.LastStatus;
         if (status is not null && !ReferenceEquals(status, _lastQualityStatus))
         {
