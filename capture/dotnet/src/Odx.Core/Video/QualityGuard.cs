@@ -29,6 +29,9 @@ public sealed class QualityGuard
 
     public IReadOnlyList<QualityAlert> Alerts => _alerts.Values.OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
 
+    public double? LastFreshFps { get; private set; }
+    public double? LastEncoderStarvationPercent { get; private set; }
+
     /// <summary>Adds or refreshes an alert produced by an external guard (focus, input-method or resource monitoring).</summary>
     public void SetExternalAlert(QualityAlert alert) => Set(alert);
 
@@ -48,6 +51,8 @@ public sealed class QualityGuard
             _previous = status;
             _previousAtUtc = receivedAtUtc;
             _lowFpsSamples = _freezeSamples = _starvedSamples = _noFrameSamples = 0;
+            LastFreshFps = null;
+            LastEncoderStarvationPercent = null;
             ClearImmediate("FPS_DROP");
             ClearImmediate("VIDEO_FREEZE");
             ClearImmediate("VIDEO_STALLED");
@@ -111,6 +116,8 @@ public sealed class QualityGuard
                 double freshFps = Math.Max(0, frames - duplicates) / elapsed;
                 double duplicateRatio = expected > 0 ? duplicates / expected : 0;
                 double starvedRatio = expected > 0 ? starved / expected : 0;
+                LastFreshFps = freshFps;
+                LastEncoderStarvationPercent = starvedRatio * 100.0;
 
                 if (freshFps < FpsAlertFloor)
                 {
