@@ -328,15 +328,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         SendAsync(new ToggleRound(countdownMs, sessionId), stop);
 
     /// <summary>
-    /// Reports focus loss using the existing Protocol 5 AgentState message. The Host receives the
-    /// marker in the ordinary RoomUpdate and sends the existing host-only ToggleRound stop command.
-    /// No new protocol message or Orchestrator update is required.
-    /// </summary>
-    /// <summary>
-    /// A Protocol 5 RoomUpdate carries the focus-loss marker from any member. The Host relays it using
-    /// the existing host-only ToggleRound command; this works independently of the UI and needs no server update.
-    /// </summary>
-    /// <summary>
     /// Protocol 5 RoomUpdate relay: any member's focus-loss or game-guard stop marker is broadcast by the
     /// unchanged server. The Host sends the existing host-only ToggleRound command exactly once.
     /// </summary>
