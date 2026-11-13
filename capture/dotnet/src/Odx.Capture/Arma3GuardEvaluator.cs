@@ -10,7 +10,6 @@ public sealed record Arma3GuardUpdate(IReadOnlyList<QualityAlert> Alerts, string
 /// </summary>
 public sealed class Arma3GuardEvaluator
 {
-    private static readonly TimeSpan Recovery = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan AlertHold = TimeSpan.FromSeconds(5);
     private readonly Dictionary<string, QualityAlert> _alerts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTime> _clearAfter = new(StringComparer.Ordinal);
@@ -40,9 +39,14 @@ public sealed class Arma3GuardEvaluator
                 "Arma 3 đang mở MENU LỆNH", $"Phát hiện {shown}. Nhấn BACKSPACE để đóng; lượt quay đã được yêu cầu dừng và đánh dấu cần quay lại."));
         }
 
+        if (sample.SampleId == 0)
+        {
+            Expire(nowUtc);
+            return new Arma3GuardUpdate(Alerts, _stopReason, !before.SequenceEqual(Snapshot()));
+        }
         _telemetryAvailable = true;
         Clear("ARMA3_TELEMETRY_NOT_VERIFIED", nowUtc);
-        if (sample.SampleId == 0 || sample.SampleId == _lastSampleId)
+        if (sample.SampleId == _lastSampleId)
         {
             Expire(nowUtc);
             return new Arma3GuardUpdate(Alerts, _stopReason, !before.SequenceEqual(Snapshot()));
@@ -132,7 +136,6 @@ public sealed class Arma3GuardEvaluator
             else _movementRecoverySamples = 0;
         }
 
-        Expire(nowUtc);
         Expire(nowUtc);
         return new Arma3GuardUpdate(Alerts, _stopReason, !before.SequenceEqual(Snapshot()));
     }
