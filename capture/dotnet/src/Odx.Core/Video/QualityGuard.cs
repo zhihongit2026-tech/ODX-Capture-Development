@@ -18,7 +18,7 @@ public sealed class QualityGuard
     private readonly Dictionary<string, QualityAlert> _alerts = new(StringComparer.Ordinal);
     private RecorderStatus? _previous;
     private DateTime _previousAtUtc;
-    private int _lowFpsSamples, _freezeSamples, _starvedSamples;
+    private int _lowFpsSamples, _freezeSamples, _starvedSamples, _noFrameSamples;
 
     public QualityGuard(double targetFps)
     {
@@ -37,9 +37,10 @@ public sealed class QualityGuard
         {
             _previous = status;
             _previousAtUtc = receivedAtUtc;
-            _lowFpsSamples = _freezeSamples = _starvedSamples = 0;
+            _lowFpsSamples = _freezeSamples = _starvedSamples = _noFrameSamples = 0;
             Clear("FPS_DROP");
             Clear("VIDEO_FREEZE");
+            Clear("VIDEO_STALLED");
             Clear("FFMPEG_BACKPRESSURE");
             Clear("RECORDER_HEARTBEAT");
         }
@@ -80,6 +81,22 @@ public sealed class QualityGuard
                 double expected = _targetFps * elapsed;
                 long frames = Math.Max(0, status.Frames - _previous.Frames);
                 long duplicates = Math.Max(0, status.Duplicates - _previous.Duplicates);
+
+                // The recorder emits progress every second even when the capture callback/encoder is stalled.
+                // A static scene is not a freeze: Windows.Graphics.Capture should still deliver fresh frames.
+                if (frames == 0)
+                {
+                    _noFrameSamples++;
+                    Set(new QualityAlert("VIDEO_STALLED",
+                        _noFrameSamples >= 2 ? QualityAlertSeverity.Critical : QualityAlertSeverity.Warning,
+                        _noFrameSamples >= 2 ? "Luồng video bị đứng" : "Không có frame video mới",
+                        $"Bộ ghi hình không ghi thêm frame trong khoảng {elapsed:0.0} giây."));
+                }
+                else
+                {
+                    _noFrameSamples = 0;
+                    Clear("VIDEO_STALLED");
+                }
                 long starved = Math.Max(0, status.Starved - _previous.Starved);
                 double freshFps = Math.Max(0, frames - duplicates) / elapsed;
                 double duplicateRatio = expected > 0 ? duplicates / expected : 0;
