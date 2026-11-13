@@ -43,13 +43,13 @@ public sealed class ResourceGuard
         Update("RESOURCE_CPU", sample.CpuPercent >= 90, sample.CpuPercent >= 95, sample.CpuPercent < 75,
             TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
             "CPU sử dụng cao", $"CPU toàn hệ thống: {sample.CpuPercent:0.#}%.",
-            "CPU quá tải nghiêm trọng", $"CPU toàn hệ thống: {sample.CpuPercent:0.#}%.");
+            "CPU quá tải nghiêm trọng", $"CPU toàn hệ thống: {sample.CpuPercent:0.#}%.", nowUtc);
 
         Update("RESOURCE_RAM", sample.RamPercent >= 90, sample.RamPercent >= 92,
             sample.RamPercent < 80 && sample.RamAvailablePercent > 20,
             TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(3),
             "RAM sử dụng cao", $"RAM đã dùng: {sample.RamPercent:0.#}%; còn trống {sample.RamAvailablePercent:0.#}%.",
-            "RAM gần cạn", $"RAM đã dùng: {sample.RamPercent:0.#}%; còn trống {sample.RamAvailablePercent:0.#}%.");
+            "RAM gần cạn", $"RAM đã dùng: {sample.RamPercent:0.#}%; còn trống {sample.RamAvailablePercent:0.#}%.", nowUtc);
 
         if (sample.Gpu3DPercent is double gpu3d && sample.FreshFps is double fps)
         {
@@ -57,7 +57,7 @@ public sealed class ResourceGuard
             Update("RESOURCE_GPU_3D", gpu3d >= 95 && fpsDegraded, gpu3d >= 98 && fpsDegraded, gpu3d < 85,
                 TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
                 "GPU 3D tải cao kèm giảm FPS", $"GPU 3D: {gpu3d:0.#}%; FPS nguồn: {fps:0.#}.",
-                "GPU 3D quá tải kèm giảm FPS", $"GPU 3D: {gpu3d:0.#}%; FPS nguồn: {fps:0.#}.");
+                "GPU 3D quá tải kèm giảm FPS", $"GPU 3D: {gpu3d:0.#}%; FPS nguồn: {fps:0.#}.", nowUtc);
         }
 
         if (sample.GpuEncodePercent is double encode && sample.EncoderStarvationPercent is double starvation)
@@ -67,7 +67,7 @@ public sealed class ResourceGuard
                 encode < 85 && starvation < 25,
                 TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(3),
                 "GPU Video Encode tải cao", $"GPU Encode: {encode:0.#}%; encoder starvation: {starvation:0.#}%.",
-                "GPU Video Encode quá tải", $"GPU Encode: {encode:0.#}%; encoder starvation: {starvation:0.#}%.");
+                "GPU Video Encode quá tải", $"GPU Encode: {encode:0.#}%; encoder starvation: {starvation:0.#}%.", nowUtc);
         }
 
         if (sample.DedicatedVramPercent is double vram)
@@ -77,7 +77,7 @@ public sealed class ResourceGuard
             Update("RESOURCE_VRAM", vram >= 90, vram >= 95, vram < 85,
                 TimeSpan.Zero, TimeSpan.Zero,
                 "VRAM sử dụng cao", $"VRAM đã dùng: {vram:0.#}%.",
-                "VRAM gần đầy", $"VRAM đã dùng: {vram:0.#}%.");
+                "VRAM gần đầy", $"VRAM đã dùng: {vram:0.#}%.", nowUtc);
         }
 
         if (sample.GpuTemperatureC is double temperature)
@@ -85,7 +85,7 @@ public sealed class ResourceGuard
             Update("RESOURCE_GPU_TEMP", temperature >= 85, temperature >= 90, temperature < 80,
                 TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
                 "GPU nóng", $"Nhiệt độ GPU: {temperature:0.#}°C.",
-                "GPU quá nóng", $"Nhiệt độ GPU: {temperature:0.#}°C.");
+                "GPU quá nóng", $"Nhiệt độ GPU: {temperature:0.#}°C.", nowUtc);
         }
     }
 
