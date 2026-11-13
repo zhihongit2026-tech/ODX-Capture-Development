@@ -23,6 +23,37 @@ public class Arma3CameraTests
         Assert.Equal(0.25, rows[2].ObjectFov);
     }
 
+    [Fact]
+    public void Extended_camera_log_keeps_camera_rows_and_parses_live_guard_telemetry()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"odx-arma3-guard-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, Arma3Camera.RawLog);
+        try
+        {
+            const string header = "t_qpc_ms,view,pos_x,pos_y,pos_z,right_x,right_y,right_z,up_x,up_y,up_z,fwd_x,fwd_y,fwd_z,fov_top,object_fov,game_fps,player_x,player_y,player_z,player_speed_mps,command_menu,action_menu,teammates_visible,teammates_total,player_alive,guard_sample_id";
+            const string row = "5000,INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75,59.5,100,200,5,0.4,RscGroupRootMenu,0,2,2,1,9";
+            File.WriteAllLines(path, [header, row, Arma3Camera.EndLine]);
+
+            var camera = Arma3Camera.Read(path);
+            var guard = Assert.Single(Arma3Camera.ReadGuardSamples(path));
+
+            Assert.Single(camera);
+            Assert.Equal(59.5, guard.GameFps);
+            Assert.Equal(new Vec3(100, 200, 5), guard.PlayerPosition);
+            Assert.Equal(0.4, guard.PlayerSpeedMps);
+            Assert.Equal("RscGroupRootMenu", guard.CommandMenu);
+            Assert.Equal(2, guard.VisibleTeammates);
+            Assert.Equal(2, guard.TotalTeammates);
+            Assert.True(guard.PlayerAlive);
+            Assert.Equal(9, guard.SampleId);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(0.75, 0.75, 73.7398)]  // engine default: tan(half) = 0.75
     [InlineData(0.75, 0.25, 28.0725)]  // optics zoom
