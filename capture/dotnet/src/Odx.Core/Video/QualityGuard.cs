@@ -29,6 +29,12 @@ public sealed class QualityGuard
 
     public IReadOnlyList<QualityAlert> Alerts => _alerts.Values.OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
 
+    /// <summary>Adds or refreshes an alert produced by an external guard (focus, input-method or resource monitoring).</summary>
+    public void SetExternalAlert(QualityAlert alert) => Set(alert);
+
+    /// <summary>Starts the standard five-second post-recovery hold for an external alert.</summary>
+    public void ResolveExternalAlert(string code, DateTime nowUtc) => Clear(code, nowUtc);
+
     public void Expire(DateTime nowUtc)
     {
         foreach (var code in _clearAfter.Where(x => x.Value <= nowUtc).Select(x => x.Key).ToArray())
