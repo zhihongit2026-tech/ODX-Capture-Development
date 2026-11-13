@@ -18,7 +18,7 @@ public sealed class Arma3GuardEvaluatorTests
         var update = guard.Observe(Sample(0, menu: "RscGroupRootMenu"), DateTime.UtcNow);
 
         Assert.Contains(update.Alerts, a => a.Code == "ARMA3_COMMAND_MENU" && a.Severity == QualityAlertSeverity.Critical);
-        Assert.StartsWith("RETAKE_REQUIRED:", update.StopReason);
+        Assert.StartsWith("RETAKE_REQUIRED:", update.StopReason ?? string.Empty);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class Arma3GuardEvaluatorTests
         var update = guard.Observe(Sample(0, action: true), DateTime.UtcNow);
 
         Assert.Contains(update.Alerts, a => a.Code == "ARMA3_COMMAND_MENU");
-        Assert.Contains("Action menu", update.StopReason);
+        Assert.Contains("Action menu", update.StopReason ?? string.Empty);
     }
 
     [Fact]
