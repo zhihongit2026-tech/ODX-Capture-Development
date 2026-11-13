@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -16,20 +17,22 @@ public partial class SmartGuardOverlay : Window
     private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
-    private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private string? _processName;
     private bool _captureExcluded;
 
     public SmartGuardOverlay()
     {
         InitializeComponent();
+        Opacity = 0;
         _follow.Tick += (_, _) => FollowTarget();
     }
 
     public void Start(string? processName)
     {
         _processName = processName;
-        if (!IsVisible) Show();
+        if (!IsLoaded) Show();
+        Hide();
         _follow.Start();
         FollowTarget();
     }
@@ -51,16 +54,22 @@ public partial class SmartGuardOverlay : Window
     private void FollowTarget()
     {
         if (!_captureExcluded || string.IsNullOrWhiteSpace(_processName)) { Hide(); return; }
-        var process = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_processName))
-            .FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
-        if (process is null) { Hide(); return; }
-        IntPtr target = process.MainWindowHandle;
+        IntPtr target = IntPtr.Zero;
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_processName)))
+        {
+            using (process)
+            {
+                if (target == IntPtr.Zero && process.MainWindowHandle != IntPtr.Zero)
+                    target = process.MainWindowHandle;
+            }
+        }
+        if (target == IntPtr.Zero) { Hide(); return; }
         if (!GetWindowRect(target, out var r) || r.Right <= r.Left || r.Bottom <= r.Top) { Hide(); return; }
         IntPtr foreground = GetForegroundWindow();
         if (foreground != target && GetAncestor(foreground, 2) != target) { Hide(); return; }
         Left = r.Right - ActualWidth - 18;
         Top = r.Top + 18;
-        if (!IsVisible) Show();
+        if (!IsVisible) { Opacity = 1; Show(); }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
