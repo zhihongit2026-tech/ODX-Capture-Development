@@ -381,6 +381,20 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         }
     }
 
+    private async Task VerifyPartyGuardStopAsync(string sessionId, CancellationToken stop)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(5), stop); }
+        catch (OperationCanceledException) { return; }
+
+        bool stillRecording;
+        lock (_gate) stillRecording = _run is not null && _runSessionId == sessionId;
+        if (stillRecording && Room?.CurrentSession == sessionId)
+        {
+            Log?.Invoke($"{sessionId}: Party-wide stop was not confirmed within five seconds; stopping this member locally to avoid continuing an invalid take.");
+            StopCapture();
+        }
+    }
+
     public async Task<bool> ReportFocusLostAsync(string sessionId, CancellationToken stop)
     {
         if (!ToggleRound.IsValidSessionId(sessionId)) return false;
@@ -447,7 +461,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         try
         {
             await SendAsync(new AgentState("recording", $"guard stop: {reason}", marker), stop);
-            if (socket.State == WebSocketState.Open) return true;
+            if (socket.State == WebSocketState.Open)
+            {
+                _ = VerifyPartyGuardStopAsync(sessionId, stop);
+                return true;
+            }
         }
         catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
                                   e is OperationCanceledException && !stop.IsCancellationRequested)
