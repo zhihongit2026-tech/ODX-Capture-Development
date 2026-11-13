@@ -128,6 +128,8 @@ public sealed partial class MatchCoordinator
             cancellation = new CancellationTokenSource();
             round.AutoStopCancellation = cancellation;
         }
+        log.LogInformation("round {Session}: auto-stop scheduled at {DeadlineUtcMs} (duration {DurationMs} ms, countdown {CountdownMs} ms)",
+            round.Record.SessionId, round.AutoStopUtcMs, options.RoundDuration.TotalMilliseconds, round.Record.CountdownMs);
 
         _ = Task.Run(async () =>
         {

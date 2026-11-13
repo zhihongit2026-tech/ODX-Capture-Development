@@ -192,6 +192,8 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
         ["game"] = room.Game,
         ["current_session"] = room.Current?.Record.SessionId,
         ["countdown"] = room.Current?.Counting ?? false,
+        ["auto_stop_utc_ms"] = room.Current?.AutoStopUtcMs,
+        ["auto_stop_scheduled"] = room.Current?.AutoStopCancellation is not null,
         ["pending_sessions"] = new JsonArray(_rounds.Values.Where(r => r.Room == room)
             .Select(r => (JsonNode)r.Record.SessionId).ToArray()),
         ["members"] = new JsonArray(room.Members.Select(a => (JsonNode)new JsonObject

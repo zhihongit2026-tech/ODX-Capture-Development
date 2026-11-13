@@ -4,6 +4,7 @@ public sealed record OrchestratorOptions(string GameProfilePath, int HttpPort = 
 {
     /// <summary>How long after a round ends to wait for every participant's Done before sending the round's files anyway.</summary>
     public TimeSpan DoneTimeout { get; init; } = TimeSpan.FromMinutes(3);
+    public TimeSpan RoundDuration { get; init; } = TimeSpan.FromMilliseconds(RoundTiming.TotalDurationMs);
     /// <summary>
     /// How long an agent that lost its connection keeps its place in a running round (recording on, on its own machine)
     /// before it is stopped there; the agent stops by itself after as long.

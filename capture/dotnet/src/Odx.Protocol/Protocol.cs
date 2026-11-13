@@ -44,8 +44,12 @@ public static class RoundTiming
     }
 
     /// <summary>The common stop deadline, exactly 03:55 after the countdown began.</summary>
-    public static double EndUtcMs(double playStartUtcMs, int countdownMs) =>
-        CountdownStartUtcMs(playStartUtcMs, countdownMs) + TotalDurationMs;
+    public static double EndUtcMs(double playStartUtcMs, int countdownMs, double durationMs = TotalDurationMs)
+    {
+        if (!double.IsFinite(durationMs) || durationMs <= 0)
+            throw new ArgumentOutOfRangeException(nameof(durationMs));
+        return CountdownStartUtcMs(playStartUtcMs, countdownMs) + durationMs;
+    }
 }
 
 /// <summary>

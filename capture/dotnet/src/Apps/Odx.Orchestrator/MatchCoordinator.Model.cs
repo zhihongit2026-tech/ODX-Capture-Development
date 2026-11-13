@@ -56,7 +56,7 @@ public sealed partial class MatchCoordinator
         public string? Server { get; init; }
         public bool ServerDone { get; set; }
         public CancellationTokenSource? AutoStopCancellation { get; set; }
-        public double AutoStopUtcMs => RoundTiming.EndUtcMs(Record.StartUtcMs, Record.CountdownMs);
+        public double AutoStopUtcMs => RoundTiming.EndUtcMs(Record.StartUtcMs, Record.CountdownMs, options.RoundDuration.TotalMilliseconds);
         /// <summary>Players who lost their connection while recording it, kept until <see cref="OrchestratorOptions.ReconnectGrace"/>.</summary>
         public HashSet<string> Away { get; } = [];
 

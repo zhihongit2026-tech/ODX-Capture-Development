@@ -19,6 +19,16 @@ public sealed class RoundTimingTests
     }
 
     [Fact]
+    public void TestDurationCanBeShortenedWithoutChangingTheProductionDefault()
+    {
+        const double countdownStartUtcMs = 7_000_000;
+        const int countdownMs = 3_000;
+        double playStartUtcMs = countdownStartUtcMs + countdownMs;
+        Assert.Equal(countdownStartUtcMs + 250, RoundTiming.EndUtcMs(playStartUtcMs, countdownMs, 250));
+        Assert.Equal(235_000, RoundTiming.TotalDurationMs);
+    }
+
+    [Fact]
     public void ZeroCountdownUsesTheFull235SecondsFromPlayStart()
     {
         const double playStartUtcMs = 5_000_000;
