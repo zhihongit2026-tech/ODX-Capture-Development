@@ -39,6 +39,8 @@ public sealed record LanState(string NetworkId, string Status, string? Address =
 public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture)
 {
     private static readonly TimeSpan Retry = TimeSpan.FromSeconds(5);
+    public const string FocusLostProblemPrefix = "ODX_FOCUS_LOST|";
+    public static string FocusLostProblem(string sessionId) => FocusLostProblemPrefix + sessionId;
 
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private ClientWebSocket? _socket;
@@ -54,7 +56,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <summary>When each game event's notice arrived, on this machine's Windows clock (Unix ms), by event_id.</summary>
     private readonly ConcurrentDictionary<long, double> _eventReceipts = new();
     private ICaptureRun? _run;
-    private string? _runSessionId, _startingSessionId, _stopReason;
+    private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -323,14 +325,18 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         SendAsync(new ToggleRound(countdownMs, sessionId), stop);
 
     /// <summary>
-    /// Reports that this participant lost game focus during the specified active round.
-    /// The orchestrator, not the client, decides the common Party stop timestamp.
-    /// Returns false if the round is no longer active here or the signal could not be sent.
+    /// Reports focus loss using the existing Protocol 5 AgentState message. The Host receives the
+    /// marker in the ordinary RoomUpdate and sends the existing host-only ToggleRound stop command.
+    /// No new protocol message or Orchestrator update is required.
     /// </summary>
     public async Task<bool> ReportFocusLostAsync(string sessionId, CancellationToken stop)
     {
         bool active;
-        lock (_gate) active = (_run is not null && _runSessionId == sessionId) || _startingSessionId == sessionId;
+        lock (_gate)
+        {
+            active = (_run is not null && _runSessionId == sessionId) || _startingSessionId == sessionId;
+            if (active) _focusLostSessionId = sessionId;
+        }
         if (!active || !ToggleRound.IsValidSessionId(sessionId)) return false;
 
         var socket = _socket;
@@ -342,7 +348,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
         try
         {
-            await SendAsync(new FocusLost(sessionId), stop);
+            await SendAsync(new AgentState("recording", $"focus lost: {sessionId}", FocusLostProblem(sessionId)), stop);
             if (socket.State == WebSocketState.Open) return true;
         }
         catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
@@ -350,8 +356,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
         }
 
-        // Network loss must not leave this machine recording indefinitely. The remaining Party members
-        // will be stopped by the orchestrator's existing reconnect-grace handling if the signal cannot arrive.
+        // If the existing Protocol 5 channel is unavailable, fail safe locally through the normal Stop path.
         StopCapture();
         return false;
     }
@@ -612,13 +617,16 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _run = run;
             _runSessionId = s.SessionId;
             _startingSessionId = null;
+            _focusLostSessionId = null;
             if (stopped.IsCancellationRequested) run.Stop();
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
         run.ProblemChanged += problem =>
         {
             Log?.Invoke($"{s.SessionId}: {problem ?? "problem cleared"}");
-            _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, problem), stop);
+            string? reportedProblem;
+            lock (_gate) reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) : problem;
+            _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, reportedProblem), stop);
         };
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
         if (Clock is { } clock)
@@ -642,6 +650,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             {
                 _run = null;
                 _runSessionId = null;
+                if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
             }
             string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
             await EndWithoutCaptureAsync(s.SessionId, $"round cancelled, recording kept locally only ({aside})", stop, cancelled: true);
@@ -661,6 +670,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             _run = null;
             _runSessionId = null;
+            if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
         }
     }
 
