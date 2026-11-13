@@ -6,7 +6,7 @@ leave it out and use your own AWS CLI setup (`AWS_PROFILE`). Region: `ap-southea
 | Script | Does |
 |---|---|
 | `bash power.sh <name> start\|stop\|status` | Starts or stops `reforger-server`, `reforger-server-small`, `arma3-server` or `odx-orchestrator` and prints its IP. Stopped: only the disk and the Elastic IP are billed. |
-| `[ODX_DOMAIN=<domain>] bash create-orchestrator.sh [profile]` | Creates `odx-orchestrator` (t3.medium, Docker, Elastic IP, SSH key `~/.ssh/odx-orchestrator.pem`) and runs `deploy/up.sh` on it. Domain: `ODX_DOMAIN` (its A record must already point at the Elastic IP; the script checks), else `<IP with dashes>.sslip.io` on the first run; later runs keep the machine's domain unless `ODX_DOMAIN` is given. Run it again to deploy the repository's HEAD; `.env` (access key), `state/` and `zerotier/` are kept. `profile` sets `ODX_GAME_PROFILE`, e.g. `arma-reforger.json`. |
+| `[ODX_DOMAIN=<domain>] bash create-orchestrator.sh [profile]` | Creates `odx-orchestrator` (t3.medium, Docker, Elastic IP, SSH key `~/.ssh/odx-orchestrator.pem`) and runs `deploy/up.sh` on it. Domain: `ODX_DOMAIN` (its A record must already point at the Elastic IP; the script checks), else `<IP with dashes>.sslip.io` on the first run; later runs keep the machine's domain unless `ODX_DOMAIN` is given. Run it again to deploy the repository's HEAD; `.env` (access key), `state/` and `zerotier/` are kept. `profile` sets `ODX_GAME_PROFILE`, the default game (rooms play the game their host chose in odx-app), e.g. `arma-reforger.json`. |
 
 It prints the orchestrator's address and access key. Put them in the repository's GitHub settings (variable
 `ODX_ORCHESTRATOR` = `https://<domain>`, secret `ODX_ACCESS_KEY`); the workflow "Release capture package" then builds the
@@ -23,12 +23,14 @@ because Steam refuses logins from AWS addresses, and uploaded by the script; the
 `OdxCapture` mod (`/opt/reforger/addons/`, lowercase `scripts/`) and `reforger/*.txt` (`$profile:odx/`) with HEAD's and
 restarts the systemd unit `reforger`.
 
-`bash create-arma3.sh [server build folder]` creates `arma3-server` (t3.xlarge, 60 GB, Elastic IP, SSH key
-`~/.ssh/arma3-server.pem`, UDP 2302–2305 open): the Arma 3 dedicated server 2.18.152405 with BattlEye off
-(`arma3/server.cfg`), the Custom difficulty with the HUD off (`arma3/odx.Arma3Profile`) and the test mission
-`arma3/mission/odx_test.stratis` (16 playable riflemen on Stratis, respawn at `respawn_west`), packed on the machine by
-`arma3/pack_pbo.py`. The build (content depot 233781 + Linux depot 233783 of app 233780, manifests in
-`document/games/arma3.md`) is downloaded on a PC with DepotDownloader and a Steam account (anonymous login is refused for this
-app; it need not own the game), because Steam refuses logins from AWS addresses, and uploaded by the script; the first run needs
-it. Each run replaces the config, profile and mission with HEAD's and restarts the systemd unit `arma3`. Players join by
+`[ARMA3_INSTANCE_TYPE=m6a.large] bash create-arma3.sh [server build folder]` creates `arma3-server` (m6a.large: 2 vCPU,
+8 GB, ~20 players; 60 GB, Elastic IP, SSH key `~/.ssh/arma3-server.pem`, UDP 2302–2305 open): the Arma 3 dedicated server
+with BattlEye off and addon signatures unchecked (`arma3/server.cfg`: the odx_capture client addon of OdxArma3.exe is
+unsigned), the Custom difficulty with the HUD off (`arma3/odx.Arma3Profile`) and the test mission
+`arma3/mission/odx_test.stratis` (64 playable riflemen on Stratis in 16 groups of 4 slots; at mission start the server
+picks 16 land positions at least 400 m apart with `BIS_fnc_findSafePos`, logged as `ODXSPAWN` lines, and each group starts
+and respawns at its own), packed on the machine by `arma3/pack_pbo.py`. Without a build folder the machine installs the current stable server itself with SteamCMD (app 233780,
+anonymous login), the version the players' Steam clients are on; a build folder pins a version instead (content depot 233781 +
+Linux depot 233783, manifests in `document/games/arma3.md`, downloaded on a PC with DepotDownloader and uploaded by the
+script). Each run replaces the config, profile and mission with HEAD's and restarts the systemd unit `arma3`. Players join by
 Direct Connect `<IP>:2302` with the password, on the same game version.

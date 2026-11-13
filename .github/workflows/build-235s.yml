@@ -1,0 +1,55 @@
+name: Build ODX 0.3.5 auto-stop 235s EXE
+on:
+  push:
+    branches: [build/capture-v0.3.5-auto-stop-235s]
+  workflow_dispatch:
+jobs:
+  package:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - name: Build patched 0.3.5 Windows application and complete package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/trquoccuong/Game-Recorder/releases/download/capture-v0.3.5/odx-capture-0.3.5-win-x64.zip'
+          Invoke-WebRequest $url -OutFile baseline.zip
+          $hash = (Get-FileHash baseline.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'd67ff01452151bf571046cbf706eab5ad0b44a5c23f987f60ec88f8da0c15968') { throw "Original release hash mismatch: $hash" }
+          Expand-Archive baseline.zip -DestinationPath extracted
+          $original = Join-Path (Get-Location) 'extracted/odx-capture-0.3.5-win-x64'
+          if (-not (Test-Path (Join-Path $original 'Odx Capture.exe'))) { throw 'No v0.3.5 launcher' }
+          if (-not (Test-Path (Join-Path $original 'bin/odx.exe'))) { throw 'No v0.3.5 CLI' }
+          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5 -o app-publish
+          if ($LASTEXITCODE -ne 0) { throw 'odx-app publish failed' }
+          $app = Join-Path (Get-Location) 'app-publish/odx-app.exe'
+          if (-not (Test-Path $app)) { throw 'No patched odx-app.exe' }
+          Copy-Item $app (Join-Path $original 'bin/odx-app.exe') -Force
+          $configFile = Join-Path $original 'bin/odx-capture.json'
+          $config = Get-Content $configFile -Raw | ConvertFrom-Json
+          $config.PSObject.Properties.Remove('access_key')
+          $config.orchestrator = 'https://13-251-211-134.sslip.io'
+          $config | ConvertTo-Json -Depth 8 | Set-Content -Path $configFile -Encoding utf8
+          @('ODX Capture 0.3.5 auto-stop 235 s - Windows x64',
+          'Only bin/odx-app.exe differs from the upstream v0.3.5 release.',
+          'IMPORTANT: Copy your EXISTING bin/odx-capture.json into bin/ to restore the private server key.',
+          'Do NOT publish that JSON: it contains a private access credential.',
+          'Preserve your existing data/ folder; do not overwrite recorded data.') | Set-Content -Path (Join-Path $original 'README-235s.txt') -Encoding utf8
+          $dest = 'odx-capture-0.3.5-auto235-win-x64'
+          Move-Item $original $dest
+          $required = @('Odx Capture.exe','bin/odx-app.exe','bin/odx.exe','bin/ffmpeg/ffmpeg.exe')
+          foreach ($rel in $required) { if (-not (Test-Path (Join-Path $dest $rel))) { throw "Package missing $rel" } }
+          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          Write-Host "EXE SHA256: $((Get-FileHash (Join-Path $dest 'bin/odx-app.exe')).Hash)"
+          Write-Host "ZIP SHA256: $((Get-FileHash "$dest.zip").Hash)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-Auto235-Windows-x64
+          path: odx-capture-0.3.5-auto235-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30
