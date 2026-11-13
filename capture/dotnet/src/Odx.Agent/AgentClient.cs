@@ -56,7 +56,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <summary>When each game event's notice arrived, on this machine's Windows clock (Unix ms), by event_id.</summary>
     private readonly ConcurrentDictionary<long, double> _eventReceipts = new();
     private ICaptureRun? _run;
-    private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId;
+    private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId, _focusStopRequestedSession;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -329,6 +329,44 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// marker in the ordinary RoomUpdate and sends the existing host-only ToggleRound stop command.
     /// No new protocol message or Orchestrator update is required.
     /// </summary>
+    /// <summary>
+    /// A Protocol 5 RoomUpdate carries the focus-loss marker from any member. The Host relays it using
+    /// the existing host-only ToggleRound command; this works independently of the UI and needs no server update.
+    /// </summary>
+    private void RelayProtocol5FocusStop(RoomUpdate update, CancellationToken stop)
+    {
+        if (update.CurrentSession is not { } session)
+        {
+            Interlocked.Exchange(ref _focusStopRequestedSession, null);
+            return;
+        }
+        if (!IsHost || update.Countdown ||
+            !update.Members.Any(member => member.Problem == FocusLostProblem(session)))
+            return;
+
+        string? previous = Volatile.Read(ref _focusStopRequestedSession);
+        if (previous == session) return;
+        if (Interlocked.CompareExchange(ref _focusStopRequestedSession, session, previous) != previous) return;
+        _ = Task.Run(() => StopPartyForFocusLossAsync(session, stop), stop);
+    }
+
+    private async Task StopPartyForFocusLossAsync(string session, CancellationToken stop)
+    {
+        try
+        {
+            // ToggleRound is a Protocol 5 toggle: verify this exact round is still active immediately before sending,
+            // so a delayed marker can never start a new round after the original one has already ended.
+            if (!IsHost || Room?.CurrentSession != session) return;
+            await ToggleRoundAsync(0, stop, session);
+            Log?.Invoke($"focus lost in {session}: Host relayed the synchronized Party stop through Protocol 5");
+        }
+        catch (Exception e) when (e is WebSocketException or OperationCanceledException or InvalidOperationException or ObjectDisposedException)
+        {
+            Interlocked.CompareExchange(ref _focusStopRequestedSession, null, session);
+            Log?.Invoke($"focus lost in {session}: could not relay Party stop: {e.Message}");
+        }
+    }
+
     public async Task<bool> ReportFocusLostAsync(string sessionId, CancellationToken stop)
     {
         if (!ToggleRound.IsValidSessionId(sessionId)) return false;
@@ -491,6 +529,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                     _ = Task.Run(CheckCaptureAsync, stop);  // the probe follows the room's game window
                 }
                 RoomChanged?.Invoke(r);
+                RelayProtocol5FocusStop(r, stop);
                 // Once per connection: the orchestrator authorizes this machine's node for the connection that says it.
                 if (r.LanNetworkId is not null && (r.LanNetworkId != _lanNetwork || !_lanAnnounced))
                 {
