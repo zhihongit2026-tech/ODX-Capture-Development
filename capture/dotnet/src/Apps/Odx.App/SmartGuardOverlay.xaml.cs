@@ -45,10 +45,10 @@ public partial class SmartGuardOverlay : Window
             a.Detail,
             a.Severity == QualityAlertSeverity.Critical ? Brushes.OrangeRed :
             a.Severity == QualityAlertSeverity.Warning ? Brushes.Gold : Brushes.LightGreen)).ToArray();
-        StateText.Text = alerts.Any(a => a.Severity == QualityAlertSeverity.Critical) ? "ACTION REQUIRED" :
-            alerts.Count > 0 ? "WARNING" : "MONITORING";
-        StateText.Foreground = alerts.Any(a => a.Severity == QualityAlertSeverity.Critical) ? Brushes.OrangeRed :
-            alerts.Count > 0 ? Brushes.Gold : Brushes.LightGreen;
+        bool critical = alerts.Any(a => a.Severity == QualityAlertSeverity.Critical);
+        bool warning = alerts.Any(a => a.Severity == QualityAlertSeverity.Warning);
+        StateText.Text = critical ? "ACTION REQUIRED" : warning ? "WARNING" : "MONITORING";
+        StateText.Foreground = critical ? Brushes.OrangeRed : warning ? Brushes.Gold : Brushes.LightGreen;
     }
 
     private void FollowTarget()
