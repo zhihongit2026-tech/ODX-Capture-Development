@@ -68,13 +68,13 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case CreateRoom create:
                 Leave(link, "left_room", effects);
                 string selectedGame = create.Game ?? _profileGame;
-                if (!_profiles.ContainsKey(selectedGame))
+                if (!string.Equals(selectedGame, _profileGame, StringComparison.Ordinal))
                 {
                     effects.Sends.Add((link, new RoomError(
-                        $"this orchestrator has no game profile \"{selectedGame}\"; it has: {string.Join(", ", _profiles.Keys.Order())}")));
+                        $"this orchestrator is configured for game profile \"{_profileGame}\", not \"{selectedGame}\"")));
                     break;
                 }
-                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork, Game = selectedGame };
+                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork, Game = _profileGame };
                 _rooms[created.Code] = created;
                 log.LogInformation("room {Room} opened by {Player}{Lan}", created.Code, link.Id,
                     lanNetwork is null ? "" : $", LAN {lanNetwork}");
