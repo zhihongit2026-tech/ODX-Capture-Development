@@ -918,7 +918,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private string? MoveAside(string dir, string why)
     {
         if (!Directory.Exists(dir)) return null;
-        string aside = $"{dir}.{why}-{DateTime.Now:yyyyMMdd-HHmmss}";
+        string aside = $"{dir}.{why}-{DateTime.Now:yyyyMMdd-HHmmss-fff}";
         try
         {
             Directory.Move(dir, aside);
