@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private readonly DailyLogFile _log = new(PackageFolders.Logs);
     private readonly bool _obsRows;
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _preflightTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
     private Strings _t = Strings.En;
@@ -78,6 +79,7 @@ public partial class MainWindow : Window
     private string? _focusGameProcess, _focusSessionId;
     private System.Threading.Timer? _focusMonitorTimer;
     private static readonly string[] InputMethodProcesses = ["UniKeyNT", "UniKey", "VietKeyNT", "VietKey"];
+    private string? _imeUnreadyForRoom;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -126,6 +128,8 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); };
+        _preflightTimer.Tick += (_, _) => CheckRoomPreflight();
+        _preflightTimer.Start();
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -228,6 +232,7 @@ public partial class MainWindow : Window
     {
         CancelAutoStop();
         CancelRoomAutoStop();
+        _preflightTimer.Stop();
         StopQualityGuard();
         DisposeResourceSamplerWhenIdle();
         if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
@@ -539,6 +544,24 @@ public partial class MainWindow : Window
         else
         {
             _qualityGuard?.ResolveExternalAlert("INPUT_METHOD_RUNNING", DateTime.UtcNow);
+        }
+    }
+
+    private void CheckRoomPreflight()
+    {
+        if (_room is not { } room || _run is not null || _state != RunState.Agent) return;
+        var runningIme = GetRunningInputMethod();
+        if (runningIme is null)
+        {
+            _imeUnreadyForRoom = null;
+            return;
+        }
+
+        if (!room.Agent.IsHost && room.Agent.IsReady && _imeUnreadyForRoom != room.Agent.Room?.Code)
+        {
+            _imeUnreadyForRoom = room.Agent.Room?.Code;
+            SetStatus(_ => $"{runningIme}.exe đã khởi chạy; đang thu hồi trạng thái Ready để ngăn Party bắt đầu.");
+            _ = room.Agent.SetReadyAsync(false, CancellationToken.None);
         }
     }
 
