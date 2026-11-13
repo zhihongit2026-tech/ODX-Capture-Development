@@ -70,6 +70,19 @@ public sealed class QualityGuardTests
     }
 
     [Fact]
+    public void External_alert_is_held_for_five_seconds_after_resolution()
+    {
+        var guard = new QualityGuard(30);
+        var t = DateTime.UtcNow;
+        guard.SetExternalAlert(new QualityAlert("FOCUS", QualityAlertSeverity.Critical, "Focus lost", "Alt+Tab"));
+        guard.ResolveExternalAlert("FOCUS", t);
+        guard.Expire(t.AddSeconds(4));
+        Assert.Contains(guard.Alerts, a => a.Code == "FOCUS");
+        guard.Expire(t.AddSeconds(5));
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "FOCUS");
+    }
+
+    [Fact]
     public void Missing_heartbeat_warns_and_recovers_when_status_returns()
     {
         var guard = new QualityGuard(30);
