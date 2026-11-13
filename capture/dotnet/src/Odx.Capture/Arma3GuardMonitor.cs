@@ -53,7 +53,11 @@ public sealed class Arma3GuardMonitor
                     }
                 }
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            catch (IOException)
+            {
+                // The recorder/extension may be opening or closing the file. Retry without blocking capture.
+            }
+            catch (UnauthorizedAccessException)
             {
                 // The recorder/extension may be opening or closing the file. Retry without blocking capture.
             }
