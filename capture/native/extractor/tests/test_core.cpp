@@ -133,6 +133,7 @@ TEST_CASE("Arma 3 log follows control.txt and matches the arma3_camera.csv fixtu
     std::filesystem::remove(control);
     log.poll();
     CHECK_FALSE(log.recording());
+    expected += std::string(kArma3EndLine) + "\n";
     CHECK(read_file(out) == expected);
 }
 
