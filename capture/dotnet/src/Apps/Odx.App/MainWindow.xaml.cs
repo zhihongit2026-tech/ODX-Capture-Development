@@ -676,9 +676,10 @@ public partial class MainWindow : Window
         guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
         _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceAlerts).ToArray());
         ScheduleResourceSample(guard);
-        if (guard.Alerts.Count > 0 || _resourceAlerts.Length > 0)
+        var allAlerts = guard.Alerts.Concat(_resourceAlerts).ToArray();
+        if (allAlerts.Length > 0)
         {
-            string message = string.Join(" | ", guard.Alerts.Select(a => a.Title + ": " + a.Detail));
+            string message = string.Join(" | ", allAlerts.Select(a => a.Title + ": " + a.Detail));
             SetStatus(_ => message);
         }
     }
