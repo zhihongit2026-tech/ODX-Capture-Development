@@ -25,6 +25,7 @@ public:
     // Opens the log control.txt names; ends the open one with "end" once control.txt is gone or names another.
     void poll();
     bool recording() const { return out_.is_open(); }
+    // Accepts the legacy 15-field camera payload and the extended 26-field camera+guard payload.
     void write(double t_qpc_ms, std::string_view payload);
 
 private:
