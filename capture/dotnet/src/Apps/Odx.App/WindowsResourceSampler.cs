@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Odx.Core;
 
@@ -211,11 +210,11 @@ public sealed class WindowsResourceSampler : IDisposable
         for (uint index = 0; index < 16; index++)
         {
             if (_nvmlGetDevice(index, out var device) != 0) break;
-            if (_nvmlGetEncoderUtilization?.Invoke(device, out uint encoder, out _) == 0)
+            if (_nvmlGetEncoderUtilization is { } getEncoder && getEncoder(device, out uint encoder, out _) == 0)
                 maxEncoder = Math.Max(maxEncoder ?? 0, encoder);
-            if (_nvmlGetTemperature?.Invoke(device, NvmlGpuTemperature, out uint temperature) == 0)
+            if (_nvmlGetTemperature is { } getTemperature && getTemperature(device, NvmlGpuTemperature, out uint temperature) == 0)
                 maxTemperature = Math.Max(maxTemperature ?? 0, temperature);
-            if (_nvmlGetMemoryInfo?.Invoke(device, out var memory) == 0 && memory.Total > 0)
+            if (_nvmlGetMemoryInfo is { } getMemory && getMemory(device, out var memory) == 0 && memory.Total > 0)
             {
                 totalMemory += memory.Total;
                 usedMemory += memory.Used;
