@@ -663,7 +663,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.NotNull(record.EndUtcMs);
         Assert.All(record.Players, p =>
         {
-            Assert.Equal(CaptureReport.Failed, p.Verdict);
+            Assert.Equal(CaptureReport.Failed, p.Verdict ?? string.Empty);
             Assert.Contains(p.Problems!, problem => problem.Contains("RETAKE_REQUIRED", StringComparison.Ordinal));
             Assert.Contains("RETAKE_REQUIRED", p.Report!.Failure ?? string.Empty);
         });
