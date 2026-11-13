@@ -68,6 +68,7 @@ public partial class MainWindow : Window
     private string? _roomAutoStopSession;
     private QualityGuard? _qualityGuard;
     private ResourceGuard _resourceGuard = new();
+    private QualityAlert[] _resourceAlerts = [];
     private readonly WindowsResourceSampler _resourceSampler = new();
     private int _resourceSamplePending;
     private RecorderStatus? _lastQualityStatus;
@@ -669,9 +670,9 @@ public partial class MainWindow : Window
             _lastQualityStatusAtUtc = now;
         }
         guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
-        _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceGuard.Alerts).ToArray());
+        _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceAlerts).ToArray());
         ScheduleResourceSample(guard);
-        if (guard.Alerts.Count > 0 || _resourceGuard.Alerts.Count > 0)
+        if (guard.Alerts.Count > 0 || _resourceAlerts.Length > 0)
         {
             string message = string.Join(" | ", guard.Alerts.Select(a => a.Title + ": " + a.Detail));
             SetStatus(_ => message);
@@ -683,6 +684,7 @@ public partial class MainWindow : Window
         if (Interlocked.Exchange(ref _resourceSamplePending, 1) != 0) return;
         double? freshFps = qualityGuard.LastFreshFps;
         double? encoderStarvation = qualityGuard.LastEncoderStarvationPercent;
+        var resourceGuard = _resourceGuard;
         _ = Task.Run(() =>
         {
             IReadOnlyList<QualityAlert> resourceAlerts;
@@ -690,14 +692,14 @@ public partial class MainWindow : Window
             {
                 var sample = _resourceSampler.Sample(freshFps, encoderStarvation);
                 DateTime now = DateTime.UtcNow;
-                _resourceGuard.Observe(sample, now);
-                _resourceGuard.Expire(now);
-                resourceAlerts = _resourceGuard.Alerts.ToArray();
+                resourceGuard.Observe(sample, now);
+                resourceGuard.Expire(now);
+                resourceAlerts = resourceGuard.Alerts.ToArray();
             }
             catch
             {
                 // Telemetry failures must not interfere with capture or FFmpeg. Unsupported sensors stay unavailable.
-                resourceAlerts = _resourceGuard.Alerts.ToArray();
+                resourceAlerts = resourceGuard.Alerts.ToArray();
             }
             finally
             {
@@ -707,7 +709,8 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (_qualityGuard != qualityGuard || _run is null) return;
-                var alerts = qualityGuard.Alerts.Concat(resourceAlerts).ToArray();
+                _resourceAlerts = resourceAlerts.ToArray();
+                var alerts = qualityGuard.Alerts.Concat(_resourceAlerts).ToArray();
                 _smartGuardOverlay?.UpdateAlerts(alerts);
                 if (alerts.Length > 0)
                     SetStatus(_ => string.Join(" | ", alerts.Select(a => a.Title + ": " + a.Detail)));
@@ -720,6 +723,7 @@ public partial class MainWindow : Window
         StopFocusMonitor();
         _qualityGuard = null;
         _resourceGuard = new ResourceGuard();
+        _resourceAlerts = [];
         _lastQualityStatus = null;
         _lastQualityStatusAtUtc = null;
         if (_smartGuardOverlay is { } overlay)
