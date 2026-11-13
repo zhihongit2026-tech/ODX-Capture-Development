@@ -100,15 +100,13 @@ public sealed class ResourceGuard
 
     private void Update(string code, bool warning, bool critical, bool recovered,
         TimeSpan warningDelay, TimeSpan criticalDelay,
-        string warningTitle, string warningDetail, string criticalTitle, string criticalDetail)
+        string warningTitle, string warningDetail, string criticalTitle, string criticalDetail, DateTime nowUtc)
     {
         if (!_rules.TryGetValue(code, out var state))
             _rules[code] = state = new RuleState();
 
-        DateTime now = DateTime.UtcNow;
-        // Caller-supplied timestamps are handled by Observe's deterministic wrapper below.
         UpdateAt(state, code, warning, critical, recovered, warningDelay, criticalDelay,
-            warningTitle, warningDetail, criticalTitle, criticalDetail, now);
+            warningTitle, warningDetail, criticalTitle, criticalDetail, nowUtc);
     }
 
     private void UpdateAt(RuleState state, string code, bool warning, bool critical, bool recovered,
