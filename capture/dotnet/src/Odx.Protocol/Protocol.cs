@@ -49,7 +49,6 @@ public static class GameEvents
 [JsonDerivedType(typeof(LeaveRoom), "leave_room")]
 [JsonDerivedType(typeof(CloseRoom), "close_room")]
 [JsonDerivedType(typeof(ToggleRound), "toggle_round")]
-[JsonDerivedType(typeof(FocusLost), "focus_lost")]
 [JsonDerivedType(typeof(RoomUpdate), "room")]
 [JsonDerivedType(typeof(RoomError), "room_error")]
 [JsonDerivedType(typeof(RoomClosed), "room_closed")]
@@ -60,7 +59,7 @@ public static class GameEvents
 public abstract record AgentMessage
 {
     /// <summary>Raised whenever a message changes in a way the other side cannot read; sent in <see cref="Hello"/>.</summary>
-    public const int Version = 6;
+    public const int Version = 5;
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -193,10 +192,6 @@ public sealed record ToggleRound(int CountdownMs, string? SessionId = null) : Ag
     /// <summary>A session id is a folder name: letters, digits, <c>_ . -</c>, 64 characters at most, not starting with a dot or dash.</summary>
     public static bool IsValidSessionId(string id) => System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$");
 }
-
-/// <summary>Agent to orchestrator: this participant lost the selected game's foreground focus during an active recording.</summary>
-/// <param name="SessionId">The active round. The orchestrator validates it against the sender's room membership and current round.</param>
-public sealed record FocusLost(string SessionId) : AgentMessage;
 
 /// <param name="Problem">What is going wrong with this member's recording, while it records or saves (<see cref="AgentState.Problem"/>).</param>
 public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State, string? Problem = null);
