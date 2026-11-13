@@ -638,6 +638,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 {
                     _stopReason = null;
                     _startingSessionId = s.SessionId;
+                    _focusLostSessionId = null;
+                    _guardStopSessionId = null;
+                    _guardStopProblem = null;
+                    _retakeRequiredSessionId = null;
+                    _retakeRequiredReason = null;
                     _stopBeforeStart = CancellationTokenSource.CreateLinkedTokenSource(stop);
                 }
                 _ = Task.Run(() => RecordAsync(s, stop), stop);
@@ -695,16 +700,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         string folder = Path.Combine(options.OutputRoot, s.SessionId);
         if (Directory.Exists(folder))
         {
-            // A task id typed again is a new take of that round: the earlier one goes, the new one takes its name.
-            try
+            // A repeated session id is a new take. Preserve the previous video and evidence instead of deleting it.
+            string? previous = MoveAside(folder, "previous-take");
+            if (previous is null)
             {
-                Directory.Delete(folder, recursive: true);
-                Log?.Invoke($"{s.SessionId}: the earlier take deleted");
+                await EndWithoutCaptureAsync(s.SessionId, "cannot preserve the previous take; refusing to overwrite it", stop);
+                return;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                Log?.Invoke($"{s.SessionId}: cannot delete the earlier take {folder}: {e.Message}");
-            }
+            Log?.Invoke($"{s.SessionId}: previous take preserved at {previous}");
         }
         string? etl = await StartPacketsAsync(s.SessionId, stop);
         ICaptureRun run;
@@ -726,6 +729,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _runSessionId = s.SessionId;
             _startingSessionId = null;
             _focusLostSessionId = null;
+            _guardStopSessionId = null;
+            _guardStopProblem = null;
             if (stopped.IsCancellationRequested) run.Stop();
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
@@ -733,9 +738,28 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             Log?.Invoke($"{s.SessionId}: {problem ?? "problem cleared"}");
             string? reportedProblem;
-            lock (_gate) reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) : problem;
+            lock (_gate)
+                reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) :
+                    _guardStopSessionId == s.SessionId ? _guardStopProblem : problem;
             _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, reportedProblem), stop);
         };
+        if (run is IGameGuardCaptureRun gameGuard)
+        {
+            gameGuard.GuardStopRequested += reason => _ = ReportGuardStopAsync(s.SessionId, "ARMA3_COMMAND_MENU", reason, stop);
+            gameGuard.GameAlertsChanged += alerts =>
+            {
+                string? reportedProblem;
+                lock (_gate)
+                {
+                    reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) :
+                        _guardStopSessionId == s.SessionId ? _guardStopProblem :
+                        alerts.Where(a => a.Severity != QualityAlertSeverity.Info)
+                            .Select(a => $"{a.Code}: {a.Detail}").FirstOrDefault();
+                }
+                _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving",
+                    s.SessionId, reportedProblem), stop);
+            };
+        }
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
         if (Clock is { } clock)
         {
@@ -752,6 +776,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
         var result = await run.Completion;
         if (etl is not null) await StopPacketsAsync(etl, result.SessionDir, stop);
+        string? retakeReason;
+        lock (_gate) retakeReason = _retakeRequiredSessionId == s.SessionId ? _retakeRequiredReason : null;
+        if (retakeReason is not null && result.Report is { } report)
+            result = result with { Report = report with { Failure = retakeReason } };
         if (Volatile.Read(ref _stopReason) == Stop.Cancelled)
         {
             lock (_gate)
@@ -759,13 +787,15 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _run = null;
                 _runSessionId = null;
                 if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
+                if (_guardStopSessionId == s.SessionId) { _guardStopSessionId = null; _guardStopProblem = null; }
+                if (_retakeRequiredSessionId == s.SessionId) { _retakeRequiredSessionId = null; _retakeRequiredReason = null; }
             }
             string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
             await EndWithoutCaptureAsync(s.SessionId, $"round cancelled, recording kept locally only ({aside})", stop, cancelled: true);
             return;
         }
-        bool ok = result.CaptureOk;
-        string? failure = ok ? null : result.Failure ?? "capture failed";
+        bool ok = result.CaptureOk && retakeReason is null;
+        string? failure = retakeReason ?? (ok ? null : result.Failure ?? "capture failed");
         await SendDoneAsync(new Done(s.SessionId, ok, failure, result.Report), stop);
         await SendAsync(new AgentState("idle"), stop);
         Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : failure)}" +
@@ -779,6 +809,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _run = null;
             _runSessionId = null;
             if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
+            if (_guardStopSessionId == s.SessionId) { _guardStopSessionId = null; _guardStopProblem = null; }
+            if (_retakeRequiredSessionId == s.SessionId) { _retakeRequiredSessionId = null; _retakeRequiredReason = null; }
         }
     }
 
