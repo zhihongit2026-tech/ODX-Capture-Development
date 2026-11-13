@@ -223,7 +223,7 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
             _stop.Set();
             throw;
         }
-        StartArma3GuardMonitor();
+        if (profile?.CameraSource == Arma3Camera.Source) StartArma3GuardMonitor();
         Completion = Task.Run(() => WaitAsync(input, record));
     }
 
