@@ -630,6 +630,12 @@ public sealed class OrchestratorTests : IAsyncLifetime
         var (member, memberStarted) = Connect(template, "menu-member", code);
         await WaitForAgents(2, code);
         await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            if (room["members"]!.AsArray().All(m => (string?)m!["player_id"] == "menu-host" || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
 
         var recorded = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
         _coordinator.RoundRecorded += files =>
@@ -659,7 +665,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
         {
             Assert.Equal(CaptureReport.Failed, p.Verdict);
             Assert.Contains(p.Problems!, problem => problem.Contains("RETAKE_REQUIRED", StringComparison.Ordinal));
-            Assert.Contains("RETAKE_REQUIRED", p.Report!.Failure);
+            Assert.Contains("RETAKE_REQUIRED", p.Report!.Failure ?? string.Empty);
         });
         Assert.Equal(FakeCapture.RoundTimes["menu-host"].End, FakeCapture.RoundTimes["menu-member"].End);
         Assert.Equal(record.EndUtcMs, FakeCapture.RoundTimes["menu-host"].End);
