@@ -125,7 +125,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                                           room.Current is { Counting: false } active &&
                                           active.Record.SessionId == focus.SessionId &&
                                           active.IndexOf(link.Id) >= 0 &&
-                                          link.State == "recording":
+                                          link.State is "starting" or "recording":
                 log.LogWarning("focus lost by {Player} in {Session}; stopping the whole Party", link.Id, focus.SessionId);
                 EndRound(room, NtpResponder.NowUnixMs(), "focus_lost", "focus_lost", effects);
                 break;
