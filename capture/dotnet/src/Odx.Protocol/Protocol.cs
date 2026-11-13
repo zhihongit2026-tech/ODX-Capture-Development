@@ -76,7 +76,7 @@ public static class RoundTiming
 public abstract record AgentMessage
 {
     /// <summary>Raised whenever a message changes in a way the other side cannot read; sent in <see cref="Hello"/>.</summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -193,7 +193,7 @@ public sealed record Ready(bool IsReady) : AgentMessage;
 /// Agent → orchestrator: open a room with this player as its host; the answer is a <see cref="RoomUpdate"/> with the invite
 /// code. <paramref name="Lan"/>: give the room a virtual LAN (a ZeroTier network) for games that only play over LAN.
 /// </summary>
-public sealed record CreateRoom(bool Lan = false) : AgentMessage;
+public sealed record CreateRoom(bool Lan = false, string? Game = null) : AgentMessage;
 
 /// <summary>Agent → orchestrator: join the room with this invite code (leaving any other).</summary>
 public sealed record JoinRoom(string Code) : AgentMessage;
@@ -216,9 +216,11 @@ public sealed record ToggleRound(int CountdownMs, string? SessionId = null) : Ag
 public sealed record RoomMember(string PlayerId, string Name, bool Ready, string State, string? Problem = null);
 
 /// <summary>Orchestrator → every member whenever the room changes (members, ready, states, round).</summary>
+/// <param name="Game">The selected game title for this room.</param>
+/// <param name="GameProfileJson">The complete game profile applied to every member before recording.</param>
 /// <param name="LanNetworkId">The room's ZeroTier network to join; null when the room has no LAN.</param>
 public sealed record RoomUpdate(string Code, string? HostPlayerId, List<RoomMember> Members, string? CurrentSession,
-    bool Countdown, string? LanNetworkId = null) : AgentMessage;
+    bool Countdown, string Game, string GameProfileJson, string? LanNetworkId = null) : AgentMessage;
 
 /// <summary>Orchestrator → agent: a room request failed (unknown code, not the host…).</summary>
 public sealed record RoomError(string Message) : AgentMessage;

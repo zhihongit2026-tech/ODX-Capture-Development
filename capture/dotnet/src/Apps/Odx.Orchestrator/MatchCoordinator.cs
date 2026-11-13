@@ -65,9 +65,16 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 else log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
                 if (room is not null) effects.Changed.Add(room);
                 break;
-            case CreateRoom:
+            case CreateRoom create:
                 Leave(link, "left_room", effects);
-                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork };
+                string selectedGame = create.Game ?? _profileGame;
+                if (!_profiles.ContainsKey(selectedGame))
+                {
+                    effects.Sends.Add((link, new RoomError(
+                        $"this orchestrator has no game profile \"{selectedGame}\"; it has: {string.Join(", ", _profiles.Keys.Order())}")));
+                    break;
+                }
+                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork, Game = selectedGame };
                 _rooms[created.Code] = created;
                 log.LogInformation("room {Room} opened by {Player}{Lan}", created.Code, link.Id,
                     lanNetwork is null ? "" : $", LAN {lanNetwork}");
@@ -212,7 +219,7 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             {
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
                     r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State, a.Problem)).ToList(),
-                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId);
+                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.Game, _profileJson, r.LanNetworkId);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();
         }
