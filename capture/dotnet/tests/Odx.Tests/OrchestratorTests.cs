@@ -22,24 +22,37 @@ namespace Odx.Tests;
 /// </summary>
 public sealed class OrchestratorTests : IAsyncLifetime
 {
-    internal sealed class FakeCapture : ICaptureRun
+    internal sealed class FakeCapture : ICaptureRun, IGameGuardCaptureRun
     {
         public CapturePhase Phase => CapturePhase.Recording;
         public int FinalizePercent => 0;
         public event Action? PhaseChanged { add { } remove { } }
         public string? Problem => null;
         public event Action<string?>? ProblemChanged { add { } remove { } }
+        public IReadOnlyList<QualityAlert> GameAlerts { get; private set; } = [];
+        public string? GuardStopReason { get; private set; }
+        public event Action<IReadOnlyList<QualityAlert>>? GameAlertsChanged;
+        public event Action<string>? GuardStopRequested;
+        public void RequestGuardStop(string reason)
+        {
+            GuardStopReason = reason;
+            GameAlerts = [new QualityAlert("ARMA3_COMMAND_MENU", QualityAlertSeverity.Critical, "Arma 3 menu open", reason)];
+            GameAlertsChanged?.Invoke(GameAlerts);
+            GuardStopRequested?.Invoke(reason);
+        }
         private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         /// <summary>What the agent passed in: the round's start (Start.StartUtcMs) and, at Stop, its end, by player.</summary>
         public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (double? Start, double? End)> RoundTimes = new();
         /// <summary>A report to return in the RunResult, by player; none gives no report (the orchestrator's verdict then follows Ok).</summary>
         public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CaptureReport> Reports = new();
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FakeCapture> Instances = new();
         private readonly string _player;
 
         /// <param name="building">How long the capture takes to build after it is stopped.</param>
         public FakeCapture(CaptureOptions options, string? template, TimeSpan building = default)
         {
             _player = options.Player?.PlayerId ?? "";
+            Instances[_player] = this;
             RoundTimes[_player] = (options.RoundStartUtcMs, null);
             SessionDir = Path.Combine(options.OutputRoot, options.DirName ?? Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(SessionDir);
@@ -606,6 +619,56 @@ public sealed class OrchestratorTests : IAsyncLifetime
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Arma3_command_menu_from_any_member_stops_party_and_marks_every_take_for_retake(bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "menu-template"));
+        var report = new CaptureReport(1416, 1416, 30, 0, 0, 0, true, "process", CaptureReport.Aligned, 0, null, null);
+        FakeCapture.Reports["menu-host"] = report;
+        FakeCapture.Reports["menu-member"] = report;
+
+        var (host, hostStarted, code) = await HostRoom("menu-host", template: template);
+        var (member, memberStarted) = Connect(template, "menu-member", code);
+        await WaitForAgents(2, code);
+        await member.SetReadyAsync(true, default);
+
+        var recorded = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files =>
+            recorded.TrySetResult(JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!);
+
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
+
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        string player = hostTriggers ? "menu-host" : "menu-member";
+        FakeCapture.Instances[player].RequestGuardStop("RETAKE_REQUIRED: Arma 3 command menu was open (RscGroupRootMenu).");
+        var record = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.Equal(2, record.Players.Count);
+        Assert.NotNull(record.EndUtcMs);
+        Assert.All(record.Players, p =>
+        {
+            Assert.Equal(CaptureReport.Failed, p.Verdict);
+            Assert.Contains(p.Problems!, problem => problem.Contains("RETAKE_REQUIRED", StringComparison.Ordinal));
+            Assert.Contains("RETAKE_REQUIRED", p.Report!.Failure);
+        });
+        Assert.Equal(FakeCapture.RoundTimes["menu-host"].End, FakeCapture.RoundTimes["menu-member"].End);
+        Assert.Equal(record.EndUtcMs, FakeCapture.RoundTimes["menu-host"].End);
+        Assert.Contains("RECORD AGAIN", AgentClient.RoundSummary(record));
+    }
+
     public async Task FocusLossFromAnyPartyMemberStopsEveryParticipantAtOneEndTimestamp(bool hostTriggers)
     {
         string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "focus-template"));
