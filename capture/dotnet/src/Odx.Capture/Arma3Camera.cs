@@ -119,12 +119,18 @@ public static class Arma3Camera
     public static Arma3GuardSample? ParseGuardSample(string line)
     {
         var fields = line.Split(',');
-        if (fields.Length != Header.Length || fields[0] == "t_qpc_ms" || fields[16].Length == 0 || fields[26].Length == 0) return null;
-        double D(int index) => Frames.ParseDouble(fields[index]);
-        int I(int index) => int.Parse(fields[index], System.Globalization.CultureInfo.InvariantCulture);
-        bool B(int index) => fields[index] == "1";
-        return new Arma3GuardSample(D(0), fields[1], D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
-            B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture));
+        if (fields.Length != Header.Length || fields[0] == "t_qpc_ms" || fields[16].Length == 0 || fields[26].Length == 0)
+            return null;
+        try
+        {
+            double D(int index) => Frames.ParseDouble(fields[index]);
+            int I(int index) => int.Parse(fields[index], System.Globalization.CultureInfo.InvariantCulture);
+            bool B(int index) => fields[index] == "1";
+            return new Arma3GuardSample(D(0), fields[1], D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
+                B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (FormatException) { return null; }
+        catch (OverflowException) { return null; }
     }
 
     public static IReadOnlyList<Arma3GuardSample> ReadGuardSamples(string path) =>
