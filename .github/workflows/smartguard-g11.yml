@@ -1,4 +1,4 @@
-name: ODX Smart Guard G1.1 - Windows QA and Orchestrator Protocol 6
+name: ODX Smart Guard G1.1 - Windows QA (Protocol 5 compatible)
 on:
   push:
     branches: [feature/smart-ai-guard-g11-party-focus]
@@ -59,7 +59,7 @@ jobs:
             'ODX Capture 0.3.5 - Smart Guard G1.1 QA - Windows x64',
             'This package preserves the upstream capture-v0.3.5 launcher, CLI, FFmpeg and game assets; only bin/odx-app.exe is rebuilt from the Smart Guard branch.',
             'F10 and the 235-second auto-stop are retained.',
-            'Party focus-loss synchronization uses Orchestrator protocol v6. Update the remote Orchestrator to the matching protocol-v6 image BEFORE using Party mode.',
+            'Party focus-loss synchronization is compatible with the existing Protocol 5 Orchestrator: members send the existing AgentState marker and the Host relays the stop through the existing ToggleRound command. No server update is required.',
             'The included bin/odx-capture.json is the upstream template and does not contain your private access_key. Before running, copy your EXISTING bin/odx-capture.json from the currently working installation over this template. Do not share that file.',
             'Do not overwrite or delete your existing data/ or captures/ folders. Extract to a new folder for QA.',
             'G1.1 includes focus-loss Party stop signaling, CPU/RAM/GPU telemetry where supported, threshold alerts, five-second recovery hold and UniKey/VietKey preflight/warnings.',
@@ -79,32 +79,7 @@ jobs:
           path: |
             odx-capture-0.3.5-smartguard-g11-win-x64.zip
             SHA256SUMS.txt
-            capture/deploy/SMART_GUARD_G11_DEPLOY.md
-            capture/deploy/compose.protocol6.yaml
+            capture/guides/SMART_GUARD_G11_CHECKLIST.md
           if-no-files-found: error
           retention-days: 30
 
-  orchestrator-protocol6:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Linux orchestrator image
-        run: |
-          docker build --pull -t odx-orchestrator:0.3.5-smartguard-g11 -f capture/deploy/Dockerfile capture
-          docker image inspect odx-orchestrator:0.3.5-smartguard-g11
-      - name: Export image for private server deployment
-        run: |
-          docker save odx-orchestrator:0.3.5-smartguard-g11 | gzip -1 > odx-orchestrator-protocol6-linux-x64.tar.gz
-          sha256sum odx-orchestrator-protocol6-linux-x64.tar.gz > ORCHESTRATOR-SHA256.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ODX-Orchestrator-Protocol6-Linux-x64
-          path: |
-            odx-orchestrator-protocol6-linux-x64.tar.gz
-            ORCHESTRATOR-SHA256.txt
-            capture/deploy/SMART_GUARD_G11_DEPLOY.md
-            capture/deploy/compose.protocol6.yaml
-          if-no-files-found: error
-          retention-days: 30
