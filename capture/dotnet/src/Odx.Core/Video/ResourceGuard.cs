@@ -2,9 +2,9 @@ namespace Odx.Core;
 
 /// <summary>One system resource sample. Null GPU fields mean that the driver/backend does not expose that sensor.</summary>
 public sealed record ResourceSnapshot(
-    double CpuPercent,
-    double RamPercent,
-    double RamAvailablePercent,
+    double? CpuPercent,
+    double? RamPercent,
+    double? RamAvailablePercent,
     double? Gpu3DPercent = null,
     double? GpuEncodePercent = null,
     double? DedicatedVramPercent = null,
@@ -40,16 +40,17 @@ public sealed class ResourceGuard
 
     public void Observe(ResourceSnapshot sample, DateTime nowUtc)
     {
-        Update("RESOURCE_CPU", sample.CpuPercent >= 90, sample.CpuPercent >= 95, sample.CpuPercent < 75,
-            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
-            "CPU sử dụng cao", $"CPU toàn hệ thống: {sample.CpuPercent:0.#}%.",
-            "CPU quá tải nghiêm trọng", $"CPU toàn hệ thống: {sample.CpuPercent:0.#}%.", nowUtc);
+        if (sample.CpuPercent is double cpu)
+            Update("RESOURCE_CPU", cpu >= 90, cpu >= 95, cpu < 75,
+                TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
+                "CPU sử dụng cao", $"CPU toàn hệ thống: {cpu:0.#}%.",
+                "CPU quá tải nghiêm trọng", $"CPU toàn hệ thống: {cpu:0.#}%.", nowUtc);
 
-        Update("RESOURCE_RAM", sample.RamPercent >= 90, sample.RamPercent >= 92,
-            sample.RamPercent < 80 && sample.RamAvailablePercent > 20,
-            TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(3),
-            "RAM sử dụng cao", $"RAM đã dùng: {sample.RamPercent:0.#}%; còn trống {sample.RamAvailablePercent:0.#}%.",
-            "RAM gần cạn", $"RAM đã dùng: {sample.RamPercent:0.#}%; còn trống {sample.RamAvailablePercent:0.#}%.", nowUtc);
+        if (sample.RamPercent is double ram && sample.RamAvailablePercent is double available)
+            Update("RESOURCE_RAM", ram >= 90, ram >= 92, ram < 80 && available > 20,
+                TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(3),
+                "RAM sử dụng cao", $"RAM đã dùng: {ram:0.#}%; còn trống {available:0.#}%.",
+                "RAM gần cạn", $"RAM đã dùng: {ram:0.#}%; còn trống {available:0.#}%.", nowUtc);
 
         if (sample.Gpu3DPercent is double gpu3d && sample.FreshFps is double fps)
         {
