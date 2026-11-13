@@ -104,8 +104,6 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
     private RecorderStatus? _lastStatus;
     private string? _problem;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, QualityAlert> _gameAlerts = new(StringComparer.Ordinal);
-    private Arma3GuardEvaluator? _arma3GuardEvaluator;
-    private Arma3GuardMonitor? _arma3GuardMonitor;
     private CancellationTokenSource? _arma3GuardStop;
     private Task? _arma3GuardTask;
     private string? _guardStopReason;
@@ -234,8 +232,6 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
         var evaluator = new Arma3GuardEvaluator();
         var monitor = new Arma3GuardMonitor();
         var guardStop = new CancellationTokenSource();
-        _arma3GuardEvaluator = evaluator;
-        _arma3GuardMonitor = monitor;
         _arma3GuardStop = guardStop;
         monitor.SampleReceived += sample =>
         {
