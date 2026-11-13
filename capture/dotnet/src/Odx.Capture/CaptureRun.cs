@@ -37,7 +37,8 @@ public sealed record RunResult(string SessionDir, bool CaptureOk, RecorderStatus
     IReadOnlyList<string> ToolErrors, BuildResult? Build, string? Failure = null, VideoFinalize.Result? Finalize = null,
     CaptureReport? Report = null)
 {
-    public bool Ok => CaptureOk && (Build is null || (Build.Error is null && Build.Issues.All(i => i.Severity != Issue.ErrorSeverity)));
+    public bool Ok => CaptureOk && (Build is null || (Build.Error is null && Build.Issues.All(i => i.Severity != Issue.ErrorSeverity))) &&
+                      Report?.Verdict != CaptureReport.Failed;
 }
 
 /// <param name="Error">Why the session could not be built; null when it was built and validated.</param>
@@ -76,7 +77,7 @@ public interface ICaptureRun
 /// with the chosen game profile and validated, then tidied (<see cref="CaptureFolder"/>): the delivered files at the top,
 /// the raw logs in raw/.
 /// </summary>
-public sealed class CaptureRun : ICaptureRun
+public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
 {
     /// <summary>Until both tools have exited: the recorder's own limits add up to ~47 s and its watchdog ends it at 55 s (RecordCommand), so this never wins.</summary>
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(75);
@@ -91,16 +92,23 @@ public sealed class CaptureRun : ICaptureRun
     private volatile CapturePhase _phase = CapturePhase.Recording;
     private volatile int _finalizePercent;
     private readonly string? _gameProfile;
+    private readonly bool _isArma3Game;
     private readonly PlayerIdentity? _player;
     /// <summary>The round's session id when the agent runs this capture (its DirName); null for a capture outside a room.</summary>
     private readonly string? _sessionId;
     private readonly string? _reforgerDir;
+    /// <summary>control.txt that tells odx_capture_x64.dll which capture to log into; null unless the profile's camera_source is arma3-mod.</summary>
+    private readonly string? _arma3Control;
     private readonly double? _roundStartUtcMs, _originRttMs;
     private readonly string? _gridOrigin;
     private double _roundEndUtcMs = double.NaN;
     private readonly double _fps;
     private RecorderStatus? _lastStatus;
     private string? _problem;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, QualityAlert> _gameAlerts = new(StringComparer.Ordinal);
+    private CancellationTokenSource? _arma3GuardStop;
+    private Task? _arma3GuardTask;
+    private string? _guardStopReason;
 
     public string SessionDir { get; }
     /// <summary>Completes when odx record reports that capture is running; it can take seconds on a cold start.</summary>
@@ -115,6 +123,11 @@ public sealed class CaptureRun : ICaptureRun
     public event Action? PhaseChanged;
     public string? Problem => Volatile.Read(ref _problem);
     public event Action<string?>? ProblemChanged;
+    public IReadOnlyList<QualityAlert> GameAlerts => _gameAlerts.Values
+        .OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
+    public string? GuardStopReason => Volatile.Read(ref _guardStopReason);
+    public event Action<IReadOnlyList<QualityAlert>>? GameAlertsChanged;
+    public event Action<string>? GuardStopRequested;
 
     private CaptureRun(CaptureOptions options)
     {
@@ -125,6 +138,20 @@ public sealed class CaptureRun : ICaptureRun
         _fps = options.Fps;
         Directory.CreateDirectory(SessionDir);
         var profile = TryLoadProfile(options.GameProfile);
+        _isArma3Game = profile?.CameraSource == Arma3Camera.Source;
+        if (_isArma3Game)
+        {
+            _arma3Control = Arma3Camera.ControlPath();
+            try
+            {
+                Arma3Camera.Begin(_arma3Control, SessionDir);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                _stderr.Add($"cannot start the Arma 3 camera log: {e.Message}");
+                _arma3Control = null;
+            }
+        }
         if (profile?.CameraSource == ReforgerCamera.Source)
         {
             _reforgerDir = ReforgerCamera.OdxDir();
@@ -198,7 +225,58 @@ public sealed class CaptureRun : ICaptureRun
             _stop.Set();
             throw;
         }
+        if (profile?.CameraSource == Arma3Camera.Source) StartArma3GuardMonitor();
         Completion = Task.Run(() => WaitAsync(input, record));
+    }
+
+    private void StartArma3GuardMonitor()
+    {
+        if (!_isArma3Game) return;  // Never display Arma 3 alerts for other games or generic screen capture.
+        var evaluator = new Arma3GuardEvaluator();
+        if (_arma3Control is null)
+        {
+            var unavailable = evaluator.MarkTelemetryUnavailable(DateTime.UtcNow);
+            PublishGameAlerts(unavailable.Alerts);
+            return;
+        }
+        var monitor = new Arma3GuardMonitor();
+        var guardStop = new CancellationTokenSource();
+        _arma3GuardStop = guardStop;
+        monitor.SampleReceived += sample =>
+        {
+            var update = evaluator.Observe(sample, DateTime.UtcNow);
+            if (update.Changed) PublishGameAlerts(update.Alerts);
+            if (update.StopReason is { } reason &&
+                Interlocked.CompareExchange(ref _guardStopReason, reason, null) is null)
+                GuardStopRequested?.Invoke(reason);
+        };
+        monitor.TelemetryUnavailable += () =>
+        {
+            var update = evaluator.MarkTelemetryUnavailable(DateTime.UtcNow);
+            if (update.Changed) PublishGameAlerts(update.Alerts);
+        };
+        string rawLog = CaptureFolder.Raw(SessionDir, Arma3Camera.RawLog);
+        _arma3GuardTask = Task.Run(() => monitor.RunAsync(rawLog, guardStop.Token));
+    }
+
+    private void PublishGameAlerts(IReadOnlyList<QualityAlert> alerts)
+    {
+        _gameAlerts.Clear();
+        foreach (var alert in alerts) _gameAlerts[alert.Code] = alert;
+        GameAlertsChanged?.Invoke(GameAlerts);
+    }
+
+    private async Task StopArma3GuardMonitorAsync()
+    {
+        if (_arma3GuardStop is null) return;
+        _arma3GuardStop.Cancel();
+        if (_arma3GuardTask is not null)
+        {
+            try { await _arma3GuardTask; }
+            catch (OperationCanceledException) { }
+        }
+        _arma3GuardStop.Dispose();
+        _arma3GuardStop = null;
     }
 
     public static CaptureRun Start(CaptureOptions options) => new(options);
@@ -321,6 +399,7 @@ public sealed class CaptureRun : ICaptureRun
         _stop.Dispose();
         _captureStopped.TrySetResult();
         await Task.WhenAll(input.WaitForExitAsync(), recordExited);
+        await StopArma3GuardMonitorAsync();
 
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
         bool captureOk = input.ExitCode == 0 && (record.ExitCode == 0 || recordKilledLate && status is { Error: null });
@@ -343,6 +422,8 @@ public sealed class CaptureRun : ICaptureRun
         if (_reforgerDir is not null &&
             ReforgerCamera.Collect(_reforgerDir, Path.GetFileName(SessionDir), SessionDir, TimeSpan.FromSeconds(3)) is { } warning)
             lock (_stderr) _stderr.Add(warning);
+        if (_arma3Control is not null && Arma3Camera.Collect(_arma3Control, SessionDir, TimeSpan.FromSeconds(3)) is { } arma3Warning)
+            lock (_stderr) _stderr.Add(arma3Warning);
         List<string> errors;
         lock (_stderr) errors = [.. _stderr];
         SetPhase(CapturePhase.Building, 100);
@@ -359,7 +440,7 @@ public sealed class CaptureRun : ICaptureRun
         long framesCut = finalize is { Ok: true } f ? Math.Max(0, (status?.Frames ?? 0) - f.Frames) : 0;
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
-            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error,
+            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure ?? GuardStopReason, status?.Audio?.Error,
             status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut));
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);

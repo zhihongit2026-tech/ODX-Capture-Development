@@ -1,0 +1,116 @@
+name: ODX Smart Guard G1.2 - Arma 3 HUD and Game Telemetry (Protocol 5)
+on:
+  push:
+    branches: [feature/smart-ai-guard-g12-arma3-hud-vision]
+  workflow_dispatch:
+jobs:
+  windows-qa:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - name: Install FFmpeg for regression fixtures
+        run: choco install ffmpeg -y --no-progress
+      - name: Build full .NET solution
+        working-directory: capture/dotnet
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
+      - name: Run complete .NET regression suite (one full retry for transient timing flakes)
+        working-directory: capture/dotnet
+        run: |
+          dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g12-attempt1.trx"
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            Write-Warning 'First full regression pass failed; rerunning the complete suite once to distinguish a transient timing flake from a reproducible regression.'
+            dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g12-attempt2.trx"
+            if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed on both full runs' }
+          }
+      - name: Build native extractor and Arma 3 extension
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            if (Test-Path capture/native/extractor/build) {
+              Remove-Item capture/native/extractor/build -Recurse -Force
+            }
+            cmake -S capture/native/extractor -B capture/native/extractor/build
+            if ($LASTEXITCODE -eq 0) {
+              cmake --build capture/native/extractor/build --config Release
+              if ($LASTEXITCODE -eq 0) { break }
+            }
+            if ($attempt -eq 2) { throw 'Native extractor/Arma 3 extension build failed after one clean retry' }
+            Write-Warning 'Native build failed; retrying once after a transient external dependency download failure.'
+            Start-Sleep -Seconds 10
+          }
+          ctest --test-dir capture/native/extractor/build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Native extractor regression failed' }
+          if (-not (Test-Path capture/native/extractor/build/Release/odx_capture_x64.dll)) {
+            throw 'Updated odx_capture_x64.dll was not produced'
+          }
+      - name: Build OdxArma3 launcher with updated addon and extension embedded
+        run: |
+          dotnet build -c Release research/arma3-camera-spike/launcher/OdxArma3
+          if ($LASTEXITCODE -ne 0) { throw 'OdxArma3 launcher build failed' }
+          if (-not (Test-Path research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe)) {
+            throw 'OdxArma3.exe missing'
+          }
+      - name: Assemble complete ODX 0.3.5 G1.2 Windows x64 QA package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/trquoccuong/Game-Recorder/releases/download/capture-v0.3.5/odx-capture-0.3.5-win-x64.zip'
+          Invoke-WebRequest $url -OutFile baseline.zip
+          $hash = (Get-FileHash baseline.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'd67ff01452151bf571046cbf706eab5ad0b44a5c23f987f60ec88f8da0c15968') { throw "Original 0.3.5 release hash mismatch: $hash" }
+          Expand-Archive baseline.zip -DestinationPath extracted
+          $original = Join-Path (Get-Location) 'extracted/odx-capture-0.3.5-win-x64'
+          foreach ($rel in @('Odx Capture.exe','bin/odx.exe','bin/odx-capture.json','bin/ffmpeg/ffmpeg.exe')) {
+            if (-not (Test-Path (Join-Path $original $rel))) { throw "Baseline package missing $rel" }
+          }
+          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5-smartguard-g12 -o app-publish
+          if ($LASTEXITCODE -ne 0) { throw 'Smart Guard WPF publish failed' }
+          $app = Join-Path (Get-Location) 'app-publish/odx-app.exe'
+          if (-not (Test-Path $app)) { throw 'Patched odx-app.exe missing' }
+          Copy-Item $app (Join-Path $original 'bin/odx-app.exe') -Force
+          $tools = Join-Path $original 'tools'
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          Copy-Item 'research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe' (Join-Path $tools 'OdxArma3.exe') -Force
+          @(
+            'ODX Capture 0.3.5 - Smart Guard G1.2 QA - Windows x64',
+            'Base: the verified ODX Capture 0.3.5 Auto235 package. F10 and the 235-second automatic stop are retained.',
+            'SERVER COMPATIBILITY: existing Orchestrator Protocol 5 only. Do not update, replace, or add a server. Keep the current server URL, access_key, database and ZeroTier configuration.',
+            'PARTY MENU STOP: a member reporting the Arma 3 Status/Reply/Command or action menu sends an existing Protocol 5 AgentState marker. The existing server broadcasts RoomUpdate; Host relays the stop with existing ToggleRound. All party takes are saved and marked RETAKE_REQUIRED.',
+            'GAME FPS: uses Arma 3 diag_fps, not the recorder output FPS. Warns only below 30 FPS after two 500 ms samples. Exactly 30 FPS does not warn.',
+            'TEAMMATES: checks same-side human players projected into the rendered camera and unobstructed by the scene. No teammate detected is NOT VERIFIED, not PASS.',
+            'MOVEMENT: warns below 0.2 m/s for 5 seconds and escalates at 10 seconds; dead players are excluded.',
+            'CAMERA: detects a change from the first camera mode; it does not change the camera automatically.',
+            'IMPORTANT MOD UPDATE: before testing Arma 3 guard features, run tools/OdxArma3.exe and launch the game with this updated launcher so it installs the new @OdxCapture addon and odx_capture_x64.dll into the existing Arma 3 game folder.',
+            'The included bin/odx-capture.json is an upstream template without your private access_key. Copy your EXISTING bin/odx-capture.json from the working installation into this package bin folder. Never share that JSON.',
+            'Extract to a new folder for QA. Do not overwrite or delete existing data/, captures/, previous takes or your working installation.',
+            'If Arma 3 is not started with the updated @OdxCapture addon, the overlay reports telemetry NOT VERIFIED; it must not claim HUD/FPS/teammate checks passed.',
+            'OBS overlay remains fail-closed/disabled until capture exclusion is proven on the actual OBS mode.'
+          ) | Set-Content -Path (Join-Path $original 'README-SMART-GUARD-G12.txt') -Encoding UTF8
+          $dest = 'odx-capture-0.3.5-smartguard-g12-arma3-win-x64'
+          Move-Item $original $dest
+          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
+          $launcherHash = (Get-FileHash (Join-Path $dest 'tools/OdxArma3.exe') -Algorithm SHA256).Hash
+          $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
+          @("odx-app.exe SHA256: $exeHash","OdxArma3.exe SHA256: $launcherHash","package ZIP SHA256: $zipHash") | Set-Content -Path SHA256SUMS.txt -Encoding ASCII
+          Write-Host "EXE SHA256: $exeHash"
+          Write-Host "OdxArma3 SHA256: $launcherHash"
+          Write-Host "ZIP SHA256: $zipHash"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-SmartGuard-G1.2-Arma3-Protocol5-Windows-x64
+          path: |
+            odx-capture-0.3.5-smartguard-g12-arma3-win-x64.zip
+            SHA256SUMS.txt
+            capture/guides/SMART_GUARD_G12_CHECKLIST.md
+          if-no-files-found: error
+          retention-days: 30

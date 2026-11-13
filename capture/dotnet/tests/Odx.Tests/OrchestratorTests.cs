@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -21,24 +22,37 @@ namespace Odx.Tests;
 /// </summary>
 public sealed class OrchestratorTests : IAsyncLifetime
 {
-    internal sealed class FakeCapture : ICaptureRun
+    internal sealed class FakeCapture : ICaptureRun, IGameGuardCaptureRun
     {
         public CapturePhase Phase => CapturePhase.Recording;
         public int FinalizePercent => 0;
         public event Action? PhaseChanged { add { } remove { } }
         public string? Problem => null;
         public event Action<string?>? ProblemChanged { add { } remove { } }
+        public IReadOnlyList<QualityAlert> GameAlerts { get; private set; } = [];
+        public string? GuardStopReason { get; private set; }
+        public event Action<IReadOnlyList<QualityAlert>>? GameAlertsChanged;
+        public event Action<string>? GuardStopRequested;
+        public void RequestGuardStop(string reason)
+        {
+            GuardStopReason = reason;
+            GameAlerts = [new QualityAlert("ARMA3_COMMAND_MENU", QualityAlertSeverity.Critical, "Arma 3 menu open", reason)];
+            GameAlertsChanged?.Invoke(GameAlerts);
+            GuardStopRequested?.Invoke(reason);
+        }
         private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         /// <summary>What the agent passed in: the round's start (Start.StartUtcMs) and, at Stop, its end, by player.</summary>
         public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (double? Start, double? End)> RoundTimes = new();
         /// <summary>A report to return in the RunResult, by player; none gives no report (the orchestrator's verdict then follows Ok).</summary>
         public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CaptureReport> Reports = new();
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FakeCapture> Instances = new();
         private readonly string _player;
 
         /// <param name="building">How long the capture takes to build after it is stopped.</param>
         public FakeCapture(CaptureOptions options, string? template, TimeSpan building = default)
         {
             _player = options.Player?.PlayerId ?? "";
+            Instances[_player] = this;
             RoundTimes[_player] = (options.RoundStartUtcMs, null);
             SessionDir = Path.Combine(options.OutputRoot, options.DirName ?? Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(SessionDir);
@@ -98,6 +112,12 @@ public sealed class OrchestratorTests : IAsyncLifetime
             {"game_title": "Synthetic", "platform": "PC", "localization": "en-US",
              "input_mouse_convention": {"maps_to": "camera_look_velocity"}, "bindings": {"W": "Forward"}}
             """);
+        // A second game next to the default: a host may open a room for it (TheHostsGameChoosesTheRoomsProfile).
+        File.WriteAllText(Path.Combine(_root, "other.json"), """
+            {"game_title": "Other", "platform": "PC", "localization": "en-US", "window_process": "other_x64",
+             "network": {"protocol": "raw", "ports": ["udp/2302"]},
+             "input_mouse_convention": {"maps_to": "camera_look_velocity"}, "bindings": {"V": "Get Out"}}
+            """);
         _ntp = NtpResponder.Bind(0);
         _ = NtpResponder.RunAsync(_ntp, _stop.Token);
         _ntpServer = $"127.0.0.1:{((IPEndPoint)_ntp.Client.LocalEndPoint!).Port}";
@@ -156,11 +176,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
     /// <param name="room">Invite code to join; null opens a new room with this player as host.</param>
     /// <param name="timeServer">The NTP server the agent checks its clock against before being ready; null skips the check.</param>
     private (AgentClient Agent, TaskCompletionSource Started) Connect(string? template, string player, string? room, string? timeServer = null,
-        TimeSpan building = default)
+        TimeSpan building = default, string? game = null)
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var agent = new AgentClient(new AgentOptions(_http.BaseAddress!, player, player.ToUpperInvariant(),
-            Path.Combine(_root, "agent-" + player), null, RoomCode: room, CreateRoom: room is null, TimeServer: timeServer), options =>
+            Path.Combine(_root, "agent-" + player), null, RoomCode: room, CreateRoom: room is null, TimeServer: timeServer, Game: game), options =>
         {
             try
             {
@@ -176,10 +196,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
         return (agent, started);
     }
 
-    /// <summary>Opens a room hosted by <paramref name="host"/> and returns its invite code.</summary>
-    private async Task<(AgentClient Host, TaskCompletionSource Started, string Code)> HostRoom(string host)
+    /// <summary>Opens a room hosted by <paramref name="host"/> (for <paramref name="game"/>, else the default) and returns its invite code.</summary>
+    private async Task<(AgentClient Host, TaskCompletionSource Started, string Code)> HostRoom(string host, string? game = null,
+        string? template = null)
     {
-        var (agent, started) = Connect(null, host, null);
+        var (agent, started) = Connect(template, host, null, game: game);
         for (int i = 0; i < 100 && agent.Room is null; i++) await Task.Delay(50);
         return (agent, started, agent.Room?.Code ?? throw new TimeoutException("no room opened"));
     }
@@ -595,6 +616,165 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.All(report.Players, p => Assert.Contains(p.Issues, i => i.Message == "no game window"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Arma3_command_menu_from_any_member_stops_party_and_marks_every_take_for_retake(bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "menu-template"));
+        var report = new CaptureReport(1416, 1416, 30, 0, 0, 0, true, "process", CaptureReport.Aligned, 0, null, null);
+        FakeCapture.Reports["menu-host"] = report;
+        FakeCapture.Reports["menu-member"] = report;
+
+        var (host, hostStarted, code) = await HostRoom("menu-host", template: template);
+        var (member, memberStarted) = Connect(template, "menu-member", code);
+        await WaitForAgents(2, code);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            if (room["members"]!.AsArray().All(m => (string?)m!["player_id"] == "menu-host" || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
+
+        var recorded = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files =>
+            recorded.TrySetResult(JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!);
+
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
+
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        string player = hostTriggers ? "menu-host" : "menu-member";
+        FakeCapture.Instances[player].RequestGuardStop("RETAKE_REQUIRED: Arma 3 command menu was open (RscGroupRootMenu).");
+        var record = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.Equal(2, record.Players.Count);
+        Assert.NotNull(record.EndUtcMs);
+        Assert.All(record.Players, p =>
+        {
+            Assert.Equal(CaptureReport.Failed, p.Verdict ?? string.Empty);
+            Assert.Contains(p.Problems!, problem => problem.Contains("RETAKE_REQUIRED", StringComparison.Ordinal));
+            Assert.Contains("RETAKE_REQUIRED", p.Report!.Failure ?? string.Empty);
+        });
+        Assert.Equal(FakeCapture.RoundTimes["menu-host"].End, FakeCapture.RoundTimes["menu-member"].End);
+        Assert.Equal(record.EndUtcMs, FakeCapture.RoundTimes["menu-host"].End);
+        Assert.Contains("RECORD AGAIN", AgentClient.RoundSummary(record));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FocusLossFromAnyPartyMemberStopsEveryParticipantAtOneEndTimestamp(bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "focus-template"));
+        var (host, hostStarted, code) = await HostRoom("p1", template: template);
+        var (member, memberStarted) = Connect(template, "p2", code);
+        await WaitForAgents(2, code);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            if (room["members"]!.AsArray().All(m => (string?)m!["player_id"] == "p1" || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
+
+        var recorded = new TaskCompletionSource<RoundFiles>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files => recorded.TrySetResult(files);
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
+
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        var focusNotice = new TaskCompletionSource<RoomUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomChanged += update =>
+        {
+            if (update?.CurrentSession == sessionId &&
+                update.Members.Any(m => m.Problem == AgentClient.FocusLostProblem(sessionId!)))
+                focusNotice.TrySetResult(update);
+        };
+
+        AgentClient reporter = hostTriggers ? host : member;
+        Assert.True(await reporter.ReportFocusLostAsync(sessionId!, default));
+
+        var notice = await focusNotice.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains(notice.Members, m => m.Problem == AgentClient.FocusLostProblem(sessionId!));
+        // The Host AgentClient automatically relays the Protocol 5 RoomUpdate marker using ToggleRound.
+        var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var record = JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!;
+        Assert.Equal("player_stop:p1", record.EndReason);
+        Assert.NotNull(record.EndUtcMs);
+        Assert.Equal(2, record.Players.Count);
+        var hostTimes = FakeCapture.RoundTimes["p1"];
+        var memberTimes = FakeCapture.RoundTimes["p2"];
+        Assert.NotNull(hostTimes.End);
+        Assert.NotNull(memberTimes.End);
+        Assert.Equal(hostTimes.End, memberTimes.End);
+        Assert.Equal(record.EndUtcMs, hostTimes.End);
+        Assert.Equal(record.EndUtcMs, memberTimes.End);
+    }
+
+    [Fact]
+    public async Task TheHostsGameChoosesTheRoomsProfileForEveryMemberAndRound()
+    {
+        var (host, hostStarted, code) = await HostRoom("p1", "Other");
+        var (member, memberStarted) = Connect(null, "p2", code);
+        await WaitForAgents(2, code);
+        for (int i = 0; i < 100 && !(host.PacketsWanted && member.PacketsWanted); i++) await Task.Delay(50);
+        Assert.Equal("Other", host.Room!.Game);
+        Assert.Equal("Other", member.Room!.Game);
+        Assert.Equal("Other", (string?)JsonNode.Parse(member.Room.GameProfileJson)!["game_title"]);
+        Assert.True(host.PacketsWanted);  // Other records packets, the default game does not
+        Assert.True(member.PacketsWanted);
+        Assert.Equal("Other", (string?)(await RoomStatus(code))["game"]);
+        var recorded = new TaskCompletionSource<RoundFiles>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files => recorded.TrySetResult(files);
+        host.Packets = new PacketCaptureTests.FakePackets();
+        member.Packets = new PacketCaptureTests.FakePackets();  // wanted packets without a capture cannot be ready
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100 && !host.Room!.Members.All(m => m.PlayerId == "p1" || m.Ready); i++) await Task.Delay(50);
+
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        await host.ToggleRoundAsync(0, default);
+
+        var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal("Other", (string?)JsonNode.Parse(files.GameProfile)!["game_title"]);
+        Assert.Equal("Get Out", (string?)JsonNode.Parse(files.GameProfile)!["bindings"]!["V"]);
+        Assert.Equal("Other", (string?)JsonNode.Parse(files.Round)!["game"]);
+    }
+
+    [Fact]
+    public async Task ARoomForAGameTheOrchestratorDoesNotHaveIsRefused()
+    {
+        var (agent, _) = Connect(null, "p1", null, game: "Nope");
+        var refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        agent.RoomError += m => refused.TrySetResult(m);
+
+        string message = await refused.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("this orchestrator has no game profile \"Nope\"; it has: Other, Synthetic", message);
+        Assert.Null(agent.Room);
+    }
+
     [Fact]
     public async Task StoppingDuringTheCountdownCancelsTheRoundAndItsNumberIsUsedAgain()
     {
@@ -775,7 +955,11 @@ public sealed class OrchestratorTests : IAsyncLifetime
         await host.ToggleRoundAsync(0, default);
         string again = await kept.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal("task-42", Path.GetFileName(again));
-        Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(again)!, "task-42*"));   // the earlier take is gone
+        string[] takes = Directory.GetDirectories(Path.GetDirectoryName(again)!, "task-42*");
+        Assert.Equal(2, takes.Length); // G1.2 preserves the earlier take instead of deleting evidence.
+        Assert.Contains(takes, dir => string.Equals(dir, again, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(takes, dir => Path.GetFileName(dir).StartsWith("task-42.previous-take-", StringComparison.Ordinal));
+        Assert.All(takes, dir => Assert.NotEmpty(Directory.GetFiles(dir, "*", SearchOption.AllDirectories)));
     }
 
     [Fact]
@@ -981,7 +1165,7 @@ public sealed class RoomLanTests
 
 public sealed class PacketCaptureTests
 {
-    private sealed class FakePackets : IPacketCapture
+    internal sealed class FakePackets : IPacketCapture
     {
         public List<string> Calls { get; } = [];
 

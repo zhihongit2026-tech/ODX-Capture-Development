@@ -20,7 +20,8 @@ public sealed partial class MatchCoordinator
             foreach (var r in _store.OpenRooms())
             {
                 var room = new Room(r.Code, r.Host, r.Server)
-                    { LanNetworkId = r.LanNetworkId, MatchId = r.MatchId, Map = r.Map, Game = r.Game, RoundNumber = r.RoundNumber };
+                    // Rooms from before protocol 5 have no game until their first match: they play the default.
+                    { LanNetworkId = r.LanNetworkId, MatchId = r.MatchId, Map = r.Map, Game = r.Game is "" ? _defaultGame : r.Game, RoundNumber = r.RoundNumber };
                 room.BetweenRounds.AddRange(r.BetweenRounds);
                 _rooms[room.Code] = room;
             }
@@ -51,14 +52,6 @@ public sealed partial class MatchCoordinator
         foreach (var (id, absence, server) in gone)
             _ = Task.Delay(options.ReconnectGrace).ContinueWith(_ => server ? Task.Run(() => GameServerGone(id, absence)) : PlayerGoneAsync(id, absence),
                 TaskScheduler.Default).Unwrap();
-        // Re-arm the time limit after a coordinator restart for still-open host rooms.
-        // The original session start time is persisted; do not grant another 235 seconds.
-        List<OpenRound> openHostRounds;
-        lock (_lock)
-            openHostRounds = _rounds.Values.Where(r => !r.Ended && !r.Counting &&
-                r.Room.HostPlayerId is not null && r.Room.Current == r).ToList();
-        foreach (var round in openHostRounds)
-            _ = AutoEndRoomRoundAsync(round);
         foreach (var round in ended)
             _ = Task.Delay(options.DoneTimeout).ContinueWith(_ => FinishAsync(round), TaskScheduler.Default).Unwrap();
     }

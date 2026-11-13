@@ -68,7 +68,6 @@ public sealed partial class MatchCoordinator
     {
         room.MatchId = GameEvents.Text(e, "match_id") ??
                        $"{room.Code}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}";
-        room.Game = GameEvents.Text(e, "game") ?? _profileGame;
         room.Map = GameEvents.Text(e, "map");
         room.RoundNumber = 0;
         log.LogInformation("room {Room}: match {Match}, {Game} {Map}", room.Code, room.MatchId, room.Game, room.Map);
@@ -99,13 +98,11 @@ public sealed partial class MatchCoordinator
         room.BetweenRounds.Clear();
         room.Current = round;
         _rounds[sid] = round;
-        // Every host-created room round has a hard 235-second limit, measured from play start.
-        if (room.HostPlayerId is not null) effects.Started = round;
         if (countdownMs == 0) ClearReady(room);
         foreach (var a in players)
         {
             a.State = "starting";
-            effects.Sends.Add((a, new Arm(sid, _profileJson, options.Fps)));
+            effects.Sends.Add((a, new Arm(sid, ProfileJson(room), options.Fps)));
             effects.Sends.Add((a, new Start(sid, countdownMs, utc + countdownMs)));
         }
         if (server is not null) effects.Sends.Add((server, new Start(sid, countdownMs, utc + countdownMs)));
@@ -117,31 +114,6 @@ public sealed partial class MatchCoordinator
         }
         log.LogInformation("round {Session}: {Count} player(s){Countdown}", sid, players.Count,
             countdownMs > 0 ? $", play starts in {countdownMs / 1000.0:F0} s" : "");
-    }
-
-    // Room rounds must stop for everyone even if the host does not press F10 again.
-    // Use the session's scheduled play-start timestamp, not the countdown or UI clock.
-    internal const int RoomRecordingLimitSeconds = 235;
-
-    private async Task AutoEndRoomRoundAsync(OpenRound round)
-    {
-        double stopAtUtcMs = round.Record.StartUtcMs + RoomRecordingLimitSeconds * 1000.0;
-        var remaining = TimeSpan.FromMilliseconds(Math.Max(0, stopAtUtcMs - NtpResponder.NowUnixMs()));
-        await Task.Delay(remaining);
-        var effects = new Effects();
-        lock (_lock)
-        {
-            if (_disposed || round.Ended || round.Counting || round.Room.Current != round) return;
-            // Avoid stopping a newly started round after the previous one's timer fires.
-            Apply(round.Room, new JsonObject
-            {
-                ["type"] = GameEvents.RoundEnd,
-                ["reason"] = "auto_stop_235_seconds",
-                ["utc_ms"] = NtpResponder.NowUnixMs(),
-            }, effects);
-        }
-        log.LogInformation("room round {Session} auto-stopped at 235 seconds", round.Record.SessionId);
-        await RunAsync(effects);
     }
 
     private async Task CountdownEndedAsync(OpenRound round)
@@ -240,7 +212,7 @@ public sealed partial class MatchCoordinator
             links = record.Players.Select(p => _agents.GetValueOrDefault(p.PlayerId)).OfType<AgentLink>().ToList();
             if (round.Server is { } id && _gameServers.TryGetValue(id, out var server)) links.Add(server);
         }
-        var files = new RoundFiles(record.SessionId, record.ToJson(), RoundRecord.EventsJsonl(events), _profileJson);
+        var files = new RoundFiles(record.SessionId, record.ToJson(), RoundRecord.EventsJsonl(events), ProfileJson(round.Room));
         foreach (var link in links) await SendAsync(link, files);
         lock (_lock)
         {
