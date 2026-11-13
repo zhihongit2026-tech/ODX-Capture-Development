@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -619,7 +620,8 @@ public sealed class OrchestratorTests : IAsyncLifetime
             await Task.Delay(50);
         }
 
-        var completed = NextSession();
+        var recorded = new TaskCompletionSource<RoundFiles>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files => recorded.TrySetResult(files);
         await host.ToggleRoundAsync(0, default);
         await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -637,8 +639,8 @@ public sealed class OrchestratorTests : IAsyncLifetime
         AgentClient reporter = hostTriggers ? host : member;
         Assert.True(await reporter.ReportFocusLostAsync(sessionId!, default));
 
-        var result = await completed.WaitAsync(TimeSpan.FromSeconds(15));
-        var record = RoundRecord.Load(result.Dir);
+        var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var record = JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!;
         Assert.Equal("focus_lost", record.EndReason);
         Assert.NotNull(record.EndUtcMs);
         Assert.Equal(2, record.Players.Count);
