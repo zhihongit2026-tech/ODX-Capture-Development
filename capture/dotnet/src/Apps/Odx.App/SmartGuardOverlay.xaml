@@ -1,0 +1,25 @@
+<Window x:Class="Odx.App.SmartGuardOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ODX Smart Guard" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight" WindowStartupLocation="Manual" IsHitTestVisible="False">
+    <Border Background="#D91A1E27" BorderBrush="#665B6472" BorderThickness="1" CornerRadius="9" Padding="12,9" MaxWidth="390">
+        <StackPanel>
+            <DockPanel>
+                <TextBlock Text="ODX SMART GUARD" Foreground="#FFB8C7D9" FontSize="11" FontWeight="Bold" />
+                <TextBlock x:Name="StateText" DockPanel.Dock="Right" Foreground="#FF64D98B" FontSize="11" FontWeight="Bold" Text="MONITORING" />
+            </DockPanel>
+            <ItemsControl x:Name="AlertList" Margin="0,6,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="0,3,0,0">
+                            <TextBlock Text="{Binding Title}" Foreground="{Binding Brush}" FontWeight="SemiBold" FontSize="13"/>
+                            <TextBlock Text="{Binding Detail}" Foreground="#FFE0E6ED" FontSize="11" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </Border>
+</Window>
