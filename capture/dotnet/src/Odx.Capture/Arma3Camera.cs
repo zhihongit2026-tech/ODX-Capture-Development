@@ -6,6 +6,10 @@ namespace Odx.Capture;
 public sealed record Arma3CameraRow(double TQpcMs, string View, Vec3 Position, Vec3 Right, Vec3 Up, Vec3 Forward, double FovTop,
     double ObjectFov);
 
+/// <summary>Live Arma 3 telemetry appended by the updated @OdxCapture addon.</summary>
+public sealed record Arma3GuardSample(double TQpcMs, double GameFps, Vec3 PlayerPosition, double PlayerSpeedMps,
+    string CommandMenu, bool ActionMenu, int VisibleTeammates, int TotalTeammates, bool PlayerAlive, long SampleId);
+
 /// <summary>
 /// Arma 3's camera (document/games/arma3.md §3, §5). While a round records, control.txt names the capture's raw log; the
 /// @OdxCapture addon passes the render camera every frame through callExtension to odx_capture_x64.dll
@@ -23,10 +27,17 @@ public static class Arma3Camera
     /// <summary>getResolution's fovTop at the engine's default FOV; getObjectFOV leaves the profile FOV out (arma3.md §3).</summary>
     public const double DefaultFovTop = 0.75;
 
-    private static readonly string[] Header =
+    private static readonly string[] LegacyHeader =
     [
         "t_qpc_ms", "view", "pos_x", "pos_y", "pos_z", "right_x", "right_y", "right_z", "up_x", "up_y", "up_z", "fwd_x", "fwd_y",
         "fwd_z", "fov_top", "object_fov",
+    ];
+
+    private static readonly string[] Header =
+    [
+        .. LegacyHeader,
+        "game_fps", "player_x", "player_y", "player_z", "player_speed_mps", "command_menu", "action_menu",
+        "teammates_visible", "teammates_total", "player_alive", "guard_sample_id",
     ];
 
     /// <summary>Same path as odx_capture_x64.dll's control_path.</summary>
@@ -100,7 +111,42 @@ public static class Arma3Camera
             }
 
             """);
+        WriteGuardTelemetry(captureDir, rows);
         return null;
+    }
+
+    /// <summary>Reads the newest complete extended telemetry row; legacy addon rows return null.</summary>
+    public static Arma3GuardSample? ParseGuardSample(string line)
+    {
+        var fields = line.Split(',');
+        if (fields.Length != Header.Length) return null;
+        double D(int index) => Frames.ParseDouble(fields[index]);
+        int I(int index) => int.Parse(fields[index], System.Globalization.CultureInfo.InvariantCulture);
+        bool B(int index) => fields[index] == "1";
+        return new Arma3GuardSample(D(0), D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
+            B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public static IReadOnlyList<Arma3GuardSample> ReadGuardSamples(string path) =>
+        File.ReadLines(path).Where(line => line.Length > 0 && line.Trim() != EndLine)
+            .Select(ParseGuardSample).Where(sample => sample is not null).Cast<Arma3GuardSample>().ToArray();
+
+    private static void WriteGuardTelemetry(string captureDir, IReadOnlyList<Arma3CameraRow> rows)
+    {
+        string source = CaptureFolder.Raw(captureDir, RawLog);
+        var samples = ReadGuardSamples(source);
+        if (samples.Count == 0) return;
+        using var writer = new StreamWriter(CaptureFolder.Raw(captureDir, "arma3_guard.csv"));
+        writer.Write(Csv.Line(["t_qpc_ms", "game_fps", "player_x", "player_y", "player_z", "player_speed_mps",
+            "command_menu", "action_menu", "teammates_visible", "teammates_total", "player_alive", "guard_sample_id"]));
+        foreach (var sample in samples)
+            writer.Write(Csv.Line([
+                Frames.FormatDouble(sample.TQpcMs), Frames.FormatDouble(sample.GameFps),
+                Frames.FormatDouble(sample.PlayerPosition.X), Frames.FormatDouble(sample.PlayerPosition.Y),
+                Frames.FormatDouble(sample.PlayerPosition.Z), Frames.FormatDouble(sample.PlayerSpeedMps),
+                sample.CommandMenu, sample.ActionMenu ? "1" : "0", sample.VisibleTeammates.ToString(),
+                sample.TotalTeammates.ToString(), sample.PlayerAlive ? "1" : "0", sample.SampleId.ToString(),
+            ]));
     }
 
     /// <summary>
@@ -127,13 +173,15 @@ public static class Arma3Camera
     public static List<Arma3CameraRow> Read(string path)
     {
         var lines = File.ReadLines(path).Where(l => l.Length > 0 && l.Trim() != EndLine).ToList();
-        if (lines.Count == 0 || lines[0].Trim() != string.Join(",", Header))
-            throw new InvalidDataException($"{path}: unexpected header");
+        bool extended = lines.Count > 0 && lines[0].Trim() == string.Join(",", Header);
+        bool legacy = lines.Count > 0 && lines[0].Trim() == string.Join(",", LegacyHeader);
+        if (!extended && !legacy) throw new InvalidDataException($"{path}: unexpected header");
+        int expectedFields = extended ? Header.Length : LegacyHeader.Length;
         var rows = new List<Arma3CameraRow>(lines.Count - 1);
         for (int k = 1; k < lines.Count; k++)
         {
             var f = lines[k].Split(',');
-            if (f.Length != Header.Length)
+            if (f.Length != expectedFields)
             {
                 if (k == lines.Count - 1) break;  // cut short: the game was closed mid-round
                 throw new InvalidDataException($"{path}: row with {f.Length} fields: {lines[k]}");
