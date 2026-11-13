@@ -345,10 +345,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             await SendAsync(new FocusLost(sessionId), stop);
             if (socket.State == WebSocketState.Open) return true;
         }
-        catch (WebSocketException)
-        {
-        }
-        catch (OperationCanceledException) when (!stop.IsCancellationRequested)
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
+                                  e is OperationCanceledException && !stop.IsCancellationRequested)
         {
         }
 
