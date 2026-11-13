@@ -467,7 +467,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             await SendAsync(new AgentState("recording", $"guard stop: {reason}", marker), stop);
             if (socket.State == WebSocketState.Open)
             {
-                _ = VerifyPartyGuardStopAsync(sessionId, stop);
+                _ = VerifyPartyStopAsync(sessionId, stop);
                 return true;
             }
         }
