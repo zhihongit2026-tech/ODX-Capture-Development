@@ -1,0 +1,76 @@
+name: ODX Smart Guard G1 - Windows x64 QA
+on:
+  push:
+    branches: [feature/smart-ai-guard-g1-overlay]
+  workflow_dispatch:
+jobs:
+  test-and-package:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+      - name: Install FFmpeg for regression fixtures
+        run: choco install ffmpeg -y --no-progress
+      - name: Build and run complete .NET regression suite
+        working-directory: capture/dotnet
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
+          dotnet test OdxCapture.sln -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed' }
+      - name: Build native extractor regression suite
+        working-directory: capture/native/extractor
+        run: |
+          cmake -B build
+          cmake --build build --config Release
+          ctest --test-dir build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Native extractor tests failed' }
+      - name: Assemble original 0.3.5 runtime and replace only ODX app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/trquoccuong/Game-Recorder/releases/download/capture-v0.3.5/odx-capture-0.3.5-win-x64.zip'
+          Invoke-WebRequest $url -OutFile baseline.zip
+          $hash = (Get-FileHash baseline.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'd67ff01452151bf571046cbf706eab5ad0b44a5c23f987f60ec88f8da0c15968') { throw "Original 0.3.5 release hash mismatch: $hash" }
+          Expand-Archive baseline.zip -DestinationPath extracted
+          $original = Join-Path (Get-Location) 'extracted/odx-capture-0.3.5-win-x64'
+          if (-not (Test-Path (Join-Path $original 'Odx Capture.exe'))) { throw 'Missing original launcher' }
+          if (-not (Test-Path (Join-Path $original 'bin/odx.exe'))) { throw 'Missing original CLI' }
+          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5-smartguard-g1 -o app-publish
+          if ($LASTEXITCODE -ne 0) { throw 'Smart Guard app publish failed' }
+          $app = Join-Path (Get-Location) 'app-publish/odx-app.exe'
+          if (-not (Test-Path $app)) { throw 'Patched odx-app.exe missing' }
+          Copy-Item $app (Join-Path $original 'bin/odx-app.exe') -Force
+          $configFile = Join-Path $original 'bin/odx-capture.json'
+          $config = Get-Content $configFile -Raw | ConvertFrom-Json
+          $config.PSObject.Properties.Remove('access_key')
+          $config.orchestrator = 'https://13-251-211-134.sslip.io'
+          $config | ConvertTo-Json -Depth 8 | Set-Content -Path $configFile -Encoding utf8
+          @(
+            'ODX Capture 0.3.5 - Smart Guard G1 QA - Windows x64',
+            'Baseline: upstream capture-v0.3.5. Existing ODX app is replaced by the QA build.',
+            'G1: live recorder heartbeat, FPS degradation, repeated-frame freeze, FFmpeg encoder backpressure/errors.',
+            'Floating Smart Guard overlay is enabled only for Windows Graphics Capture and only when the selected game window is foreground.',
+            'OBS mode fails closed: the in-game overlay is disabled because OBS capture paths are not uniformly guaranteed to honor Windows Display Affinity.',
+            'IMPORTANT: copy your existing bin/odx-capture.json (including your own access_key) into this package bin folder before joining your private server.',
+            'Keep your existing data/ and captures/ folders. Do not overwrite recorded data.',
+            'This is a G1 QA build, not the final AI teammate/HUD/camera feature set.'
+          ) | Set-Content -Path (Join-Path $original 'README-SMART-GUARD-G1.txt') -Encoding utf8
+          $dest = 'odx-capture-0.3.5-smartguard-g1-win-x64'
+          Move-Item $original $dest
+          $required = @('Odx Capture.exe','bin/odx-app.exe','bin/odx.exe','bin/ffmpeg/ffmpeg.exe','bin/odx-capture.json')
+          foreach ($rel in $required) { if (-not (Test-Path (Join-Path $dest $rel))) { throw "Missing package component: $rel" } }
+          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          Write-Host "EXE SHA256: $((Get-FileHash (Join-Path $dest 'bin/odx-app.exe')).Hash)"
+          Write-Host "ZIP SHA256: $((Get-FileHash "$dest.zip").Hash)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-SmartGuard-G1-Windows-x64
+          path: odx-capture-0.3.5-smartguard-g1-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30

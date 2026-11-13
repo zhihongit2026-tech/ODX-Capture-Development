@@ -16,12 +16,14 @@ namespace Odx.Agent;
 /// <param name="AutoReady">Says ready whenever it is idle in a room between rounds (headless capture machines).</param>
 /// <param name="AccessKey">The orchestrator's access key (access_key in odx-capture.json), sent with every request.</param>
 /// <param name="Lan">With <paramref name="CreateRoom"/>: the new room gets a virtual LAN (ZeroTier).</param>
+/// <param name="Game">With <paramref name="CreateRoom"/>: the game_title of the game profile the room's rounds use (the one the
+/// host chose in odx-app); null takes the orchestrator's default.</param>
 /// <param name="TimeServer">A real NTP server (time_server of odx-capture.json) the Windows clock is checked against before
 /// a round (spec v3 §4 layer 1): a clock further than <see cref="ClockCheck.MaxOffsetMs"/> off cannot be ready. Null skips
 /// the check.</param>
 public sealed record AgentOptions(Uri Orchestrator, string PlayerId, string Name, string OutputRoot, string? WindowProcess,
     string? RoomCode = null, bool CreateRoom = false, bool AutoReady = false, string? AccessKey = null, bool Lan = false,
-    string? TimeServer = null, string? MachineId = null);
+    string? TimeServer = null, string? MachineId = null, string? Game = null);
 
 /// <param name="Status">"joining", "ok", "zerotier_missing" (not installed, or its tray app never ran), "error".</param>
 /// <param name="Address">This machine's IP on the room's LAN once "ok"; the error text for "error".</param>
@@ -37,6 +39,8 @@ public sealed record LanState(string NetworkId, string Status, string? Address =
 public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture)
 {
     private static readonly TimeSpan Retry = TimeSpan.FromSeconds(5);
+    public const string FocusLostProblemPrefix = "ODX_FOCUS_LOST|";
+    public static string FocusLostProblem(string sessionId) => FocusLostProblemPrefix + sessionId;
 
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private ClientWebSocket? _socket;
@@ -45,12 +49,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private Arm? _armed;
     private string? _profilePath;
     private string? _profileWindow;
+    /// <summary>The room's game profile as last applied (window, packets); a room update with another one applies it again.</summary>
+    private string? _roomProfileJson;
     private PacketCaptureSpec? _armedNetwork;
     private readonly object _gate = new();
     /// <summary>When each game event's notice arrived, on this machine's Windows clock (Unix ms), by event_id.</summary>
     private readonly ConcurrentDictionary<long, double> _eventReceipts = new();
     private ICaptureRun? _run;
-    private string? _runSessionId, _startingSessionId, _stopReason;
+    private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId, _focusStopRequestedSession;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -202,7 +208,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             Log?.Invoke($"connected to {options.Orchestrator} as {options.PlayerId}");
             foreach (var done in unconfirmed) await SendAsync(done, stop);
             if (_roomCode is not null) await SendAsync(new JoinRoom(_roomCode), stop);
-            else if (options.CreateRoom) await SendAsync(new CreateRoom(options.Lan), stop);
+            else if (options.CreateRoom) await SendAsync(new CreateRoom(options.Lan, options.Game), stop);
 
             var buffer = new byte[64 * 1024];
             while (!stop.IsCancellationRequested && socket.State == WebSocketState.Open)
@@ -318,6 +324,82 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     public Task ToggleRoundAsync(int countdownMs, CancellationToken stop, string? sessionId = null) =>
         SendAsync(new ToggleRound(countdownMs, sessionId), stop);
 
+    /// <summary>
+    /// Reports focus loss using the existing Protocol 5 AgentState message. The Host receives the
+    /// marker in the ordinary RoomUpdate and sends the existing host-only ToggleRound stop command.
+    /// No new protocol message or Orchestrator update is required.
+    /// </summary>
+    /// <summary>
+    /// A Protocol 5 RoomUpdate carries the focus-loss marker from any member. The Host relays it using
+    /// the existing host-only ToggleRound command; this works independently of the UI and needs no server update.
+    /// </summary>
+    private void RelayProtocol5FocusStop(RoomUpdate update, CancellationToken stop)
+    {
+        if (update.CurrentSession is not { } session)
+        {
+            Interlocked.Exchange(ref _focusStopRequestedSession, null);
+            return;
+        }
+        if (!IsHost || update.Countdown ||
+            !update.Members.Any(member => member.Problem == FocusLostProblem(session)))
+            return;
+
+        string? previous = Volatile.Read(ref _focusStopRequestedSession);
+        if (previous == session) return;
+        if (Interlocked.CompareExchange(ref _focusStopRequestedSession, session, previous) != previous) return;
+        _ = Task.Run(() => StopPartyForFocusLossAsync(session, stop), stop);
+    }
+
+    private async Task StopPartyForFocusLossAsync(string session, CancellationToken stop)
+    {
+        try
+        {
+            // ToggleRound is a Protocol 5 toggle: verify this exact round is still active immediately before sending,
+            // so a delayed marker can never start a new round after the original one has already ended.
+            if (!IsHost || Room?.CurrentSession != session) return;
+            await ToggleRoundAsync(0, stop, session);
+            Log?.Invoke($"focus lost in {session}: Host relayed the synchronized Party stop through Protocol 5");
+        }
+        catch (Exception e) when (e is WebSocketException or OperationCanceledException or InvalidOperationException or ObjectDisposedException)
+        {
+            Interlocked.CompareExchange(ref _focusStopRequestedSession, null, session);
+            Log?.Invoke($"focus lost in {session}: could not relay Party stop: {e.Message}");
+        }
+    }
+
+    public async Task<bool> ReportFocusLostAsync(string sessionId, CancellationToken stop)
+    {
+        if (!ToggleRound.IsValidSessionId(sessionId)) return false;
+        bool active;
+        lock (_gate)
+        {
+            active = (_run is not null && _runSessionId == sessionId) || _startingSessionId == sessionId;
+            if (active) _focusLostSessionId = sessionId;
+        }
+        if (!active) return false;
+
+        var socket = _socket;
+        if (socket is not { State: WebSocketState.Open })
+        {
+            StopCapture();
+            return false;
+        }
+
+        try
+        {
+            await SendAsync(new AgentState("recording", $"focus lost: {sessionId}", FocusLostProblem(sessionId)), stop);
+            if (socket.State == WebSocketState.Open) return true;
+        }
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
+                                  e is OperationCanceledException && !stop.IsCancellationRequested)
+        {
+        }
+
+        // If the existing Protocol 5 channel is unavailable, fail safe locally through the normal Stop path.
+        StopCapture();
+        return false;
+    }
+
     public async Task LeaveRoomAsync(CancellationToken stop)
     {
         await SendAsync(new LeaveRoom(), stop);
@@ -335,6 +417,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         _roomCode = null;
         Room = null;
+        _roomProfileJson = null;  // the next room applies its profile even when it is the same game
         IsReady = false;
         LeaveLan();
         RoomChanged?.Invoke(null);
@@ -428,17 +511,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _serverClock = w.ServerClock;
                 Volatile.Write(ref _reconnectGraceMs, w.ReconnectGraceMs);
                 _ = Task.Run(() => CheckClockAsync(stop), stop);
-                if (w.GameProfileJson is { } welcomeProfile)
-                {
-                    var profile = GameProfile.Parse(JsonNode.Parse(welcomeProfile)!.AsObject(), "orchestrator");
-                    _profileWindow = profile.WindowProcess;
-                    if (profile.Network is { } network)
-                    {
-                        PacketsWanted = true;
-                        PacketCaptureWanted?.Invoke(network);
-                    }
-                }
-                _ = Task.Run(CheckCaptureAsync, stop);
                 break;
             case RoomUpdate r:
                 bool joined = Room?.Code != r.Code;
@@ -446,8 +518,18 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _roomCode = r.Code;
                 var me = r.Members.FirstOrDefault(m => m.PlayerId == options.PlayerId);
                 IsReady = me?.Ready == true;
-                if (joined) Log?.Invoke($"in room {r.Code}{(IsHost ? " (host)" : "")}");
+                if (joined) Log?.Invoke($"in room {r.Code}{(IsHost ? " (host)" : "")}: {r.Game}");
+                if (r.GameProfileJson != _roomProfileJson)
+                {
+                    _roomProfileJson = r.GameProfileJson;
+                    var profile = GameProfile.Parse(JsonNode.Parse(r.GameProfileJson)!.AsObject(), "orchestrator");
+                    _profileWindow = profile.WindowProcess;
+                    PacketsWanted = profile.Network is not null;
+                    if (profile.Network is { } network) PacketCaptureWanted?.Invoke(network);
+                    _ = Task.Run(CheckCaptureAsync, stop);  // the probe follows the room's game window
+                }
                 RoomChanged?.Invoke(r);
+                RelayProtocol5FocusStop(r, stop);
                 // Once per connection: the orchestrator authorizes this machine's node for the connection that says it.
                 if (r.LanNetworkId is not null && (r.LanNetworkId != _lanNetwork || !_lanAnnounced))
                 {
@@ -575,13 +657,16 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _run = run;
             _runSessionId = s.SessionId;
             _startingSessionId = null;
+            _focusLostSessionId = null;
             if (stopped.IsCancellationRequested) run.Stop();
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
         run.ProblemChanged += problem =>
         {
             Log?.Invoke($"{s.SessionId}: {problem ?? "problem cleared"}");
-            _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, problem), stop);
+            string? reportedProblem;
+            lock (_gate) reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) : problem;
+            _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, reportedProblem), stop);
         };
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
         if (Clock is { } clock)
@@ -605,6 +690,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             {
                 _run = null;
                 _runSessionId = null;
+                if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
             }
             string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
             await EndWithoutCaptureAsync(s.SessionId, $"round cancelled, recording kept locally only ({aside})", stop, cancelled: true);
@@ -624,6 +710,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             _run = null;
             _runSessionId = null;
+            if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
         }
     }
 
