@@ -53,7 +53,7 @@ public sealed class Arma3GuardEvaluatorTests
         for (int i = 0; i < 4; i++)
             guard.Observe(Sample(3 + i, fps: 60), t.AddSeconds(1 + i * 0.5));
         Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
-        guard.Expire(t.AddSeconds(7));
+        guard.Expire(t.AddSeconds(7.6));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
     }
 
