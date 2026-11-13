@@ -331,13 +331,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// </summary>
     public async Task<bool> ReportFocusLostAsync(string sessionId, CancellationToken stop)
     {
+        if (!ToggleRound.IsValidSessionId(sessionId)) return false;
         bool active;
         lock (_gate)
         {
             active = (_run is not null && _runSessionId == sessionId) || _startingSessionId == sessionId;
             if (active) _focusLostSessionId = sessionId;
         }
-        if (!active || !ToggleRound.IsValidSessionId(sessionId)) return false;
+        if (!active) return false;
 
         var socket = _socket;
         if (socket is not { State: WebSocketState.Open })
