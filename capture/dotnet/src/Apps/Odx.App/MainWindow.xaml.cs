@@ -75,6 +75,7 @@ public partial class MainWindow : Window
     private DateTime? _lastQualityStatusAtUtc;
     private SmartGuardOverlay? _smartGuardOverlay;
     private string? _focusLossSession;
+    private DateTime? _focusAlertAtUtc;
     private string? _focusGameProcess, _focusSessionId;
     private System.Threading.Timer? _focusMonitorTimer;
     private static readonly string[] InputMethodProcesses = ["UniKeyNT", "UniKey", "VietKeyNT", "VietKey"];
@@ -229,7 +230,7 @@ public partial class MainWindow : Window
         CancelAutoStop();
         CancelRoomAutoStop();
         StopQualityGuard();
-        _resourceSampler.Dispose();
+        DisposeResourceSamplerWhenIdle();
         if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
         _tray.Dispose();
         _packets.Dispose();
@@ -580,7 +581,9 @@ public partial class MainWindow : Window
         if (_run is null || _focusSessionId != session) return;
         var alert = new QualityAlert("GAME_FOCUS_LOST", QualityAlertSeverity.Critical,
             "Đã rời cửa sổ game", "Phát hiện Alt+Tab hoặc cửa sổ game mất focus. Đang yêu cầu dừng lượt quay.");
+        _focusAlertAtUtc = DateTime.UtcNow;
         _qualityGuard?.SetExternalAlert(alert);
+        _qualityGuard?.ResolveExternalAlert("GAME_FOCUS_LOST", _focusAlertAtUtc.Value);
         _smartGuardOverlay?.UpdateAlerts(_qualityGuard?.Alerts ?? [alert]);
         SetStatus(_ => alert.Detail);
 
@@ -628,6 +631,7 @@ public partial class MainWindow : Window
         }
         catch (ArgumentException) { }
         catch (InvalidOperationException) { }
+        catch (Win32Exception) { }
         return false;
     }
 
@@ -664,10 +668,10 @@ public partial class MainWindow : Window
         var status = run.LastStatus;
         if (status is not null && !ReferenceEquals(status, _lastQualityStatus))
         {
-            var now = DateTime.UtcNow;
-            guard.Observe(status, now);
+            var statusAt = DateTime.UtcNow;
+            guard.Observe(status, statusAt);
             _lastQualityStatus = status;
-            _lastQualityStatusAtUtc = now;
+            _lastQualityStatusAtUtc = statusAt;
         }
         guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
         _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceAlerts).ToArray());
@@ -721,6 +725,12 @@ public partial class MainWindow : Window
     private void StopQualityGuard()
     {
         StopFocusMonitor();
+        bool holdFocusAlert = _focusAlertAtUtc is DateTime focusAt &&
+            _qualityGuard?.Alerts.Any(a => a.Code == "GAME_FOCUS_LOST") == true;
+        TimeSpan focusHold = holdFocusAlert
+            ? TimeSpan.FromSeconds(5) - (DateTime.UtcNow - focusAt)
+            : TimeSpan.Zero;
+        _focusAlertAtUtc = null;
         _qualityGuard = null;
         _resourceGuard = new ResourceGuard();
         _resourceAlerts = [];
@@ -728,9 +738,31 @@ public partial class MainWindow : Window
         _lastQualityStatusAtUtc = null;
         if (_smartGuardOverlay is { } overlay)
         {
-            overlay.Close();
             _smartGuardOverlay = null;
+            if (focusHold > TimeSpan.Zero) _ = CloseOverlayAfterDelayAsync(overlay, focusHold);
+            else overlay.Close();
         }
+    }
+
+    private async Task CloseOverlayAfterDelayAsync(SmartGuardOverlay overlay, TimeSpan delay)
+    {
+        await Task.Delay(delay);
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        await Dispatcher.InvokeAsync(overlay.Close);
+    }
+
+    private void DisposeResourceSamplerWhenIdle()
+    {
+        if (Volatile.Read(ref _resourceSamplePending) == 0)
+        {
+            _resourceSampler.Dispose();
+            return;
+        }
+        _ = Task.Run(async () =>
+        {
+            while (Volatile.Read(ref _resourceSamplePending) != 0) await Task.Delay(50);
+            _resourceSampler.Dispose();
+        });
     }
 
     private void CancelAutoStop()
