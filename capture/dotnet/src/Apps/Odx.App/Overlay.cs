@@ -23,6 +23,13 @@ internal static class Overlay
         SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
     }
 
+    /// <summary>Excludes the main ODX window from monitor capture without making it click-through or non-activating.</summary>
+    public static bool ExcludeFromCapture(Window window)
+    {
+        var hwnd = new WindowInteropHelper(window).Handle;
+        return SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+    }
+
     [DllImport("user32.dll")]
     private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 

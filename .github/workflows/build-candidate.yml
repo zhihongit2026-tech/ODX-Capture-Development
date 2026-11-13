@@ -1,0 +1,80 @@
+name: Build ODX Capture 0.3.6 Candidate
+
+on:
+  push:
+    branches:
+      - work/auto-record-235s-v0.3.6
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf
+
+      - uses: actions/cache@v4
+        with:
+          path: capture/dotnet/.cache/ffmpeg-*
+          key: ffmpeg-${{ hashFiles('capture/dotnet/ffmpeg/build-ffmpeg.sh') }}
+
+      - name: Verify protected source configuration
+        shell: pwsh
+        run: |
+          git diff --exit-code origin/main...HEAD -- capture/config/odx-capture.json
+          if ($LASTEXITCODE -ne 0) { throw 'Protected odx-capture.json was modified' }
+          $hash = (Get-FileHash 'capture/config/odx-capture.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "Repository template config SHA-256: $hash"
+
+      - name: Build Windows x64 Candidate including local Orchestrator executable
+        working-directory: capture/dotnet
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./publish.ps1 -Version 0.3.6 -WithOrchestrator
+          if ($LASTEXITCODE -ne 0) { throw 'publish.ps1 failed' }
+
+      - name: Verify Candidate package
+        shell: pwsh
+        run: |
+          $zipPath = 'capture/dotnet/dist/odx-capture-0.3.6-win-x64.zip'
+          if (!(Test-Path $zipPath)) { throw 'Candidate ZIP missing' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $required = @(
+              'odx-capture-0.3.6-win-x64/Odx Capture.exe',
+              'odx-capture-0.3.6-win-x64/bin/odx-app.exe',
+              'odx-capture-0.3.6-win-x64/bin/odx.exe',
+              'odx-capture-0.3.6-win-x64/bin/odx-orchestrator.exe',
+              'odx-capture-0.3.6-win-x64/bin/odx-capture.json'
+            )
+            foreach ($name in $required) {
+              if ($null -eq $zip.GetEntry($name)) { throw "Missing Candidate entry: $name" }
+            }
+          }
+          finally { $zip.Dispose() }
+          Get-FileHash $zipPath -Algorithm SHA256 | Format-List
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.6-Candidate-win-x64
+          path: capture/dotnet/dist/odx-capture-0.3.6-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

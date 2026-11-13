@@ -94,11 +94,13 @@ public sealed partial class MatchCoordinator
         if (server is null && (room.Server is not null || _gameServers.Count > 1))
             log.LogWarning("{Session}: no game server records it (room bound to {Server}; connected: {Connected})", sid,
                 room.Server ?? "none", string.Join(", ", _gameServers.Keys));
-        var round = new OpenRound(room, record) { Counting = countdownMs > 0, Server = server?.Id };
+        double autoStopUtcMs = RoundTiming.EndUtcMs(record.StartUtcMs, countdownMs, options.RoundDuration.TotalMilliseconds);
+        var round = new OpenRound(room, record, autoStopUtcMs) { Counting = countdownMs > 0, Server = server?.Id };
         round.Events.AddRange(room.BetweenRounds);
         room.BetweenRounds.Clear();
         room.Current = round;
         _rounds[sid] = round;
+        effects.AutoStops.Add(round);
         if (countdownMs == 0) ClearReady(room);
         foreach (var a in players)
         {
@@ -115,6 +117,58 @@ public sealed partial class MatchCoordinator
         }
         log.LogInformation("round {Session}: {Count} player(s){Countdown}", sid, players.Count,
             countdownMs > 0 ? $", play starts in {countdownMs / 1000.0:F0} s" : "");
+    }
+
+    private void ScheduleAutoStop(OpenRound round)
+    {
+        CancellationTokenSource cancellation;
+        lock (_lock)
+        {
+            if (_disposed || round.Room.Current != round || round.Ended) return;
+            round.AutoStopCancellation?.Cancel();
+            cancellation = new CancellationTokenSource();
+            round.AutoStopCancellation = cancellation;
+        }
+        log.LogInformation("round {Session}: auto-stop scheduled at {DeadlineUtcMs} (duration {DurationMs} ms, countdown {CountdownMs} ms)",
+            round.Record.SessionId, round.AutoStopUtcMs, options.RoundDuration.TotalMilliseconds, round.Record.CountdownMs);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                double delayMs = round.AutoStopUtcMs - NtpResponder.NowUnixMs();
+                if (delayMs > 0)
+                    await Task.Delay(TimeSpan.FromMilliseconds(delayMs), cancellation.Token);
+
+                var effects = new Effects();
+                lock (_lock)
+                {
+                    if (_disposed || round.Room.Current != round || round.Ended) return;
+                    EndRound(round.Room, round.AutoStopUtcMs, "auto_timeout", "auto_timeout", effects);
+                }
+                log.LogInformation("round {Session}: shared 03:55 auto-stop reached", round.Record.SessionId);
+                await RunAsync(effects);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                lock (_lock)
+                {
+                    if (ReferenceEquals(round.AutoStopCancellation, cancellation))
+                        round.AutoStopCancellation = null;
+                }
+                cancellation.Dispose();
+            }
+        });
+    }
+
+    private static void CancelAutoStop(OpenRound round)
+    {
+        var cancellation = round.AutoStopCancellation;
+        round.AutoStopCancellation = null;
+        cancellation?.Cancel();
     }
 
     private async Task CountdownEndedAsync(OpenRound round)
@@ -150,13 +204,14 @@ public sealed partial class MatchCoordinator
     {
         var room = round.Room;
         double utc = NtpResponder.NowUnixMs();
+        CancelAutoStop(round);
         round.Counting = false;
         round.Ended = true;
         room.Current = null;
         _rounds.Remove(round.Record.SessionId);
         room.RoundNumber = round.Record.Round - 1;
         foreach (var p in round.Record.Players.ToList()) StopPlayer(round, p.PlayerId, utc, Stop.Cancelled, effects);
-        StopServer(round, Stop.Cancelled, effects);
+        StopServer(round, Stop.Cancelled, utc, effects);
         var e = new JsonObject { ["type"] = "round_cancelled", ["utc_ms"] = utc, ["cancelled_session_id"] = round.Record.SessionId,
             ["reason"] = reason };
         Stamp(room, e, utc, effects);
@@ -175,10 +230,10 @@ public sealed partial class MatchCoordinator
         log.LogInformation("stop {Player} in {Session}: {Reason}", playerId, round.Record.SessionId, reason);
     }
 
-    private void StopServer(OpenRound round, string reason, Effects effects)
+    private void StopServer(OpenRound round, string reason, double utc, Effects effects)
     {
         if (round.Server is { } id && _gameServers.TryGetValue(id, out var server))
-            effects.Sends.Add((server, new Stop(round.Record.SessionId, reason)));
+            effects.Sends.Add((server, new Stop(round.Record.SessionId, reason, utc)));
     }
 
     /// <param name="playerReason">Stop reason of every player still recording.</param>
@@ -186,11 +241,12 @@ public sealed partial class MatchCoordinator
     private void EndRound(Room room, double utc, string playerReason, string endReason, Effects effects)
     {
         var round = room.Current!;
+        CancelAutoStop(round);
         room.Current = null;
         round.Ended = true;
         round.Record = round.Record with { EndUtcMs = utc, EndReason = endReason };
         foreach (var p in round.Record.Players.ToList()) StopPlayer(round, p.PlayerId, utc, playerReason, effects);
-        StopServer(round, playerReason, effects);
+        StopServer(round, playerReason, utc, effects);
         effects.Ended.Add(round);
         effects.Changed.Add(room);
     }

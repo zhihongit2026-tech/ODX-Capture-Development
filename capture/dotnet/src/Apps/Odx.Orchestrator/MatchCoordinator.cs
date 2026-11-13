@@ -65,9 +65,16 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
                 else log.LogInformation("agent {Player}: {State} {Detail}", link.Id, s.State, s.Detail);
                 if (room is not null) effects.Changed.Add(room);
                 break;
-            case CreateRoom:
+            case CreateRoom create:
                 Leave(link, "left_room", effects);
-                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork };
+                string selectedGame = create.Game ?? _profileGame;
+                if (!string.Equals(selectedGame, _profileGame, StringComparison.Ordinal))
+                {
+                    effects.Sends.Add((link, new RoomError(
+                        $"this orchestrator is configured for game profile \"{_profileGame}\", not \"{selectedGame}\"")));
+                    break;
+                }
+                var created = new Room(NewCode(), link.Id) { LanNetworkId = lanNetwork, Game = _profileGame };
                 _rooms[created.Code] = created;
                 log.LogInformation("room {Room} opened by {Player}{Lan}", created.Code, link.Id,
                     lanNetwork is null ? "" : $", LAN {lanNetwork}");
@@ -185,6 +192,8 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
         ["game"] = room.Game,
         ["current_session"] = room.Current?.Record.SessionId,
         ["countdown"] = room.Current?.Counting ?? false,
+        ["auto_stop_utc_ms"] = room.Current?.AutoStopUtcMs,
+        ["auto_stop_scheduled"] = room.Current?.AutoStopCancellation is not null,
         ["pending_sessions"] = new JsonArray(_rounds.Values.Where(r => r.Room == room)
             .Select(r => (JsonNode)r.Record.SessionId).ToArray()),
         ["members"] = new JsonArray(room.Members.Select(a => (JsonNode)new JsonObject
@@ -212,11 +221,12 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             {
                 var update = new RoomUpdate(r.Code, r.HostPlayerId,
                     r.Members.Select(a => new RoomMember(a.Id, a.Hello.Name, a.Ready, a.State, a.Problem)).ToList(),
-                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.LanNetworkId);
+                    r.Current?.Record.SessionId, r.Current?.Counting ?? false, r.Game, _profileJson, r.LanNetworkId);
                 return r.Members.Select(a => (a, (AgentMessage)update));
             }).ToList();
         }
         foreach (var (link, message) in effects.Sends.Concat(updates)) await SendAsync(link, message);
+        foreach (var round in effects.AutoStops) ScheduleAutoStop(round);
         foreach (var (network, node) in effects.LanRevoke)
         {
             try

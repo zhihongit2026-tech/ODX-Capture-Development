@@ -14,6 +14,7 @@ public sealed partial class MatchCoordinator
         if (_store is null) return;
         var gone = new List<(string Id, long Absence, bool Server)>();
         var ended = new List<OpenRound>();
+        var autoStops = new List<OpenRound>();
         lock (_lock)
         {
             _eventId = _store.NextEventId;
@@ -33,11 +34,18 @@ public sealed partial class MatchCoordinator
                     room.RoundNumber = s.Record.Round - 1;
                     continue;
                 }
-                var round = new OpenRound(room, s.Record) { Server = s.Server, ServerDone = s.ServerDone, Ended = s.State == "ended" };
+                double autoStopUtcMs = RoundTiming.EndUtcMs(s.Record.StartUtcMs, s.Record.CountdownMs,
+                    options.RoundDuration.TotalMilliseconds);
+                var round = new OpenRound(room, s.Record, autoStopUtcMs)
+                    { Server = s.Server, ServerDone = s.ServerDone, Ended = s.State == "ended" };
                 round.Events.AddRange(s.Events);
                 _rounds[s.SessionId] = round;
                 if (round.Ended) ended.Add(round);
-                else room.Current = round;
+                else
+                {
+                    room.Current = round;
+                    autoStops.Add(round);
+                }
                 foreach (var p in round.Record.Players.Where(p => !p.Done))
                 {
                     if (p.StopReason is null) round.Away.Add(p.PlayerId);
@@ -48,6 +56,7 @@ public sealed partial class MatchCoordinator
             log.LogInformation("restored {Rooms} room(s) and {Rounds} unfinished round(s) from {Store}", _rooms.Count, _rounds.Count,
                 options.StatePath);
         }
+        foreach (var round in autoStops) ScheduleAutoStop(round);
         foreach (var (id, absence, server) in gone)
             _ = Task.Delay(options.ReconnectGrace).ContinueWith(_ => server ? Task.Run(() => GameServerGone(id, absence)) : PlayerGoneAsync(id, absence),
                 TaskScheduler.Default).Unwrap();
@@ -85,6 +94,7 @@ public sealed partial class MatchCoordinator
         lock (_lock)
         {
             _disposed = true;
+            foreach (var round in _rounds.Values) CancelAutoStop(round);
             _store?.Dispose();
         }
     }

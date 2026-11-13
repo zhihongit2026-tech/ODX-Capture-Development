@@ -6,7 +6,7 @@ COPY dotnet/src/Odx.Core dotnet/src/Odx.Core
 COPY dotnet/src/Odx.Protocol dotnet/src/Odx.Protocol
 COPY dotnet/src/Apps/Odx.Orchestrator dotnet/src/Apps/Odx.Orchestrator
 COPY config/odx-capture.json config/
-ARG VERSION=0.1.0
+ARG VERSION=0.3.6
 RUN dotnet publish dotnet/src/Apps/Odx.Orchestrator -c Release -o /app -p:Version=$VERSION
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

@@ -16,12 +16,14 @@ namespace Odx.Agent;
 /// <param name="AutoReady">Says ready whenever it is idle in a room between rounds (headless capture machines).</param>
 /// <param name="AccessKey">The orchestrator's access key (access_key in odx-capture.json), sent with every request.</param>
 /// <param name="Lan">With <paramref name="CreateRoom"/>: the new room gets a virtual LAN (ZeroTier).</param>
+/// <param name="Game">With <paramref name="CreateRoom"/>: the game_title of the game profile the room's rounds use (the one the
+/// host chose in odx-app); null takes the orchestrator's default.</param>
 /// <param name="TimeServer">A real NTP server (time_server of odx-capture.json) the Windows clock is checked against before
 /// a round (spec v3 §4 layer 1): a clock further than <see cref="ClockCheck.MaxOffsetMs"/> off cannot be ready. Null skips
 /// the check.</param>
 public sealed record AgentOptions(Uri Orchestrator, string PlayerId, string Name, string OutputRoot, string? WindowProcess,
     string? RoomCode = null, bool CreateRoom = false, bool AutoReady = false, string? AccessKey = null, bool Lan = false,
-    string? TimeServer = null, string? MachineId = null);
+    string? TimeServer = null, string? MachineId = null, string? Game = null);
 
 /// <param name="Status">"joining", "ok", "zerotier_missing" (not installed, or its tray app never ran), "error".</param>
 /// <param name="Address">This machine's IP on the room's LAN once "ok"; the error text for "error".</param>
@@ -45,12 +47,15 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private Arm? _armed;
     private string? _profilePath;
     private string? _profileWindow;
+    /// <summary>The room's game profile as last applied (window, packets); a room update with another one applies it again.</summary>
+    private string? _roomProfileJson;
     private PacketCaptureSpec? _armedNetwork;
     private readonly object _gate = new();
     /// <summary>When each game event's notice arrived, on this machine's Windows clock (Unix ms), by event_id.</summary>
     private readonly ConcurrentDictionary<long, double> _eventReceipts = new();
     private ICaptureRun? _run;
     private string? _runSessionId, _startingSessionId, _stopReason;
+    private double? _stopEndUtcMs;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -68,6 +73,12 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// begins (round_start_frame). The token is cancelled if the round is stopped before the countdown ends.
     /// </summary>
     public event Action<int, CancellationToken>? Countdown;
+
+    /// <summary>
+    /// Shared room timer for the full 03:55 window. The UTC values are converted to this machine's clock for display;
+    /// only the orchestrator sends the authoritative Stop.
+    /// </summary>
+    public event Action<string, double, double, int, CancellationToken>? RoundTimerStarted;
 
     /// <summary>Raised with the room's latest state, or null once out of it (left, closed by the host).</summary>
     public event Action<RoomUpdate?>? RoomChanged;
@@ -202,7 +213,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             Log?.Invoke($"connected to {options.Orchestrator} as {options.PlayerId}");
             foreach (var done in unconfirmed) await SendAsync(done, stop);
             if (_roomCode is not null) await SendAsync(new JoinRoom(_roomCode), stop);
-            else if (options.CreateRoom) await SendAsync(new CreateRoom(options.Lan), stop);
+            else if (options.CreateRoom) await SendAsync(new CreateRoom(options.Lan, options.Game), stop);
 
             var buffer = new byte[64 * 1024];
             while (!stop.IsCancellationRequested && socket.State == WebSocketState.Open)
@@ -335,6 +346,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         _roomCode = null;
         Room = null;
+        _roomProfileJson = null;  // the next room applies its profile even when it is the same game
         IsReady = false;
         LeaveLan();
         RoomChanged?.Invoke(null);
@@ -428,17 +440,6 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _serverClock = w.ServerClock;
                 Volatile.Write(ref _reconnectGraceMs, w.ReconnectGraceMs);
                 _ = Task.Run(() => CheckClockAsync(stop), stop);
-                if (w.GameProfileJson is { } welcomeProfile)
-                {
-                    var profile = GameProfile.Parse(JsonNode.Parse(welcomeProfile)!.AsObject(), "orchestrator");
-                    _profileWindow = profile.WindowProcess;
-                    if (profile.Network is { } network)
-                    {
-                        PacketsWanted = true;
-                        PacketCaptureWanted?.Invoke(network);
-                    }
-                }
-                _ = Task.Run(CheckCaptureAsync, stop);
                 break;
             case RoomUpdate r:
                 bool joined = Room?.Code != r.Code;
@@ -446,7 +447,16 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _roomCode = r.Code;
                 var me = r.Members.FirstOrDefault(m => m.PlayerId == options.PlayerId);
                 IsReady = me?.Ready == true;
-                if (joined) Log?.Invoke($"in room {r.Code}{(IsHost ? " (host)" : "")}");
+                if (joined) Log?.Invoke($"in room {r.Code}{(IsHost ? " (host)" : "")}: {r.Game}");
+                if (r.GameProfileJson != _roomProfileJson)
+                {
+                    _roomProfileJson = r.GameProfileJson;
+                    var profile = GameProfile.Parse(JsonNode.Parse(r.GameProfileJson)!.AsObject(), "orchestrator");
+                    _profileWindow = profile.WindowProcess;
+                    PacketsWanted = profile.Network is not null;
+                    if (profile.Network is { } network) PacketCaptureWanted?.Invoke(network);
+                    _ = Task.Run(CheckCaptureAsync, stop);  // the probe follows the room's game window
+                }
                 RoomChanged?.Invoke(r);
                 // Once per connection: the orchestrator authorizes this machine's node for the connection that says it.
                 if (r.LanNetworkId is not null && (r.LanNetworkId != _lanNetwork || !_lanAnnounced))
@@ -487,6 +497,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 lock (_gate)
                 {
                     _stopReason = null;
+                    _stopEndUtcMs = null;
                     _startingSessionId = s.SessionId;
                     _stopBeforeStart = CancellationTokenSource.CreateLinkedTokenSource(stop);
                 }
@@ -532,6 +543,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         lock (_gate)
         {
+            _stopEndUtcMs = endUtcMs;
             _stopBeforeStart?.Cancel();
             _run?.Stop(endUtcMs);
         }
@@ -541,6 +553,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     {
         CancellationToken stopped;
         lock (_gate) stopped = _stopBeforeStart!.Token;
+        double playStartUtcMs = s.StartUtcMs ?? (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + s.CountdownMs);
+        double clockOffsetMs = Clock?.ReferenceOffsetMs ?? 0;
+        double countdownStartLocalUtcMs = RoundTiming.CountdownStartUtcMs(playStartUtcMs, s.CountdownMs) - clockOffsetMs;
+        double deadlineLocalUtcMs = RoundTiming.EndUtcMs(playStartUtcMs, s.CountdownMs) - clockOffsetMs;
+        RoundTimerStarted?.Invoke(s.SessionId, countdownStartLocalUtcMs, deadlineLocalUtcMs, s.CountdownMs, stopped);
         if (s.CountdownMs > 0) Countdown?.Invoke(s.CountdownMs, stopped);
         string folder = Path.Combine(options.OutputRoot, s.SessionId);
         if (Directory.Exists(folder))
@@ -575,7 +592,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _run = run;
             _runSessionId = s.SessionId;
             _startingSessionId = null;
-            if (stopped.IsCancellationRequested) run.Stop();
+            if (stopped.IsCancellationRequested) run.Stop(_stopEndUtcMs);
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
         run.ProblemChanged += problem =>
@@ -624,6 +641,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         {
             _run = null;
             _runSessionId = null;
+            _stopBeforeStart?.Cancel();
+            _stopEndUtcMs = null;
         }
     }
 
@@ -665,7 +684,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// <param name="cancelled">A cancelled round: the orchestrator waits for nobody, so the Done is not sent again.</param>
     private async Task EndWithoutCaptureAsync(string sessionId, string reason, CancellationToken stop, bool cancelled = false)
     {
-        lock (_gate) _startingSessionId = null;
+        lock (_gate)
+        {
+            _startingSessionId = null;
+            _stopBeforeStart?.Cancel();
+        }
         var done = new Done(sessionId, false, reason);
         await (cancelled ? SendAsync(done, stop) : SendDoneAsync(done, stop));
         await SendAsync(new AgentState("idle"), stop);
