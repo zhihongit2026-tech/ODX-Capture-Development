@@ -76,7 +76,7 @@ public interface ICaptureRun
 /// with the chosen game profile and validated, then tidied (<see cref="CaptureFolder"/>): the delivered files at the top,
 /// the raw logs in raw/.
 /// </summary>
-public sealed class CaptureRun : ICaptureRun
+public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
 {
     /// <summary>Until both tools have exited: the recorder's own limits add up to ~47 s and its watchdog ends it at 55 s (RecordCommand), so this never wins.</summary>
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(75);
@@ -103,6 +103,12 @@ public sealed class CaptureRun : ICaptureRun
     private readonly double _fps;
     private RecorderStatus? _lastStatus;
     private string? _problem;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, QualityAlert> _gameAlerts = new(StringComparer.Ordinal);
+    private Arma3GuardEvaluator? _arma3GuardEvaluator;
+    private Arma3GuardMonitor? _arma3GuardMonitor;
+    private CancellationTokenSource? _arma3GuardStop;
+    private Task? _arma3GuardTask;
+    private string? _guardStopReason;
 
     public string SessionDir { get; }
     /// <summary>Completes when odx record reports that capture is running; it can take seconds on a cold start.</summary>
@@ -117,6 +123,11 @@ public sealed class CaptureRun : ICaptureRun
     public event Action? PhaseChanged;
     public string? Problem => Volatile.Read(ref _problem);
     public event Action<string?>? ProblemChanged;
+    public IReadOnlyList<QualityAlert> GameAlerts => _gameAlerts.Values
+        .OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
+    public string? GuardStopReason => Volatile.Read(ref _guardStopReason);
+    public event Action<IReadOnlyList<QualityAlert>>? GameAlertsChanged;
+    public event Action<string>? GuardStopRequested;
 
     private CaptureRun(CaptureOptions options)
     {
@@ -213,7 +224,51 @@ public sealed class CaptureRun : ICaptureRun
             _stop.Set();
             throw;
         }
+        StartArma3GuardMonitor();
         Completion = Task.Run(() => WaitAsync(input, record));
+    }
+
+    private void StartArma3GuardMonitor()
+    {
+        if (_arma3Control is null) return;
+        _arma3GuardEvaluator = new Arma3GuardEvaluator();
+        _arma3GuardMonitor = new Arma3GuardMonitor();
+        _arma3GuardStop = new CancellationTokenSource();
+        _arma3GuardMonitor.SampleReceived += sample =>
+        {
+            var update = _arma3GuardEvaluator.Observe(sample, DateTime.UtcNow);
+            if (update.Changed) PublishGameAlerts(update.Alerts);
+            if (update.StopReason is { } reason &&
+                Interlocked.CompareExchange(ref _guardStopReason, reason, null) is null)
+                GuardStopRequested?.Invoke(reason);
+        };
+        _arma3GuardMonitor.TelemetryUnavailable += () =>
+        {
+            var update = _arma3GuardEvaluator.MarkTelemetryUnavailable(DateTime.UtcNow);
+            if (update.Changed) PublishGameAlerts(update.Alerts);
+        };
+        string rawLog = CaptureFolder.Raw(SessionDir, Arma3Camera.RawLog);
+        _arma3GuardTask = Task.Run(() => _arma3GuardMonitor.RunAsync(rawLog, _arma3GuardStop.Token));
+    }
+
+    private void PublishGameAlerts(IReadOnlyList<QualityAlert> alerts)
+    {
+        _gameAlerts.Clear();
+        foreach (var alert in alerts) _gameAlerts[alert.Code] = alert;
+        GameAlertsChanged?.Invoke(GameAlerts);
+    }
+
+    private async Task StopArma3GuardMonitorAsync()
+    {
+        if (_arma3GuardStop is null) return;
+        _arma3GuardStop.Cancel();
+        if (_arma3GuardTask is not null)
+        {
+            try { await _arma3GuardTask; }
+            catch (OperationCanceledException) { }
+        }
+        _arma3GuardStop.Dispose();
+        _arma3GuardStop = null;
     }
 
     public static CaptureRun Start(CaptureOptions options) => new(options);
@@ -336,6 +391,7 @@ public sealed class CaptureRun : ICaptureRun
         _stop.Dispose();
         _captureStopped.TrySetResult();
         await Task.WhenAll(input.WaitForExitAsync(), recordExited);
+        await StopArma3GuardMonitorAsync();
 
         var status = LastStatus is { Event: RecorderStatus.Stopped } stopped ? stopped : null;
         bool captureOk = input.ExitCode == 0 && (record.ExitCode == 0 || recordKilledLate && status is { Error: null });
@@ -376,7 +432,7 @@ public sealed class CaptureRun : ICaptureRun
         long framesCut = finalize is { Ok: true } f ? Math.Max(0, (status?.Frames ?? 0) - f.Frames) : 0;
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
-            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure, status?.Audio?.Error,
+            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure ?? GuardStopReason, status?.Audio?.Error,
             status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut));
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
