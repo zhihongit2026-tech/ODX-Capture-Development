@@ -71,7 +71,8 @@ public partial class MainWindow : Window
     private DateTime? _lastQualityStatusAtUtc;
     private SmartGuardOverlay? _smartGuardOverlay;
     private string? _focusLossSession;
-    private DateTime _lastFocusCheckUtc;
+    private string? _focusGameProcess, _focusSessionId;
+    private System.Threading.Timer? _focusMonitorTimer;
     private static readonly string[] InputMethodProcesses = ["UniKeyNT", "UniKey", "VietKeyNT", "VietKey"];
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
@@ -341,7 +342,10 @@ public partial class MainWindow : Window
     {
         switch (_state)
         {
-            case RunState.Idle: BeginCountdown(); break;
+            case RunState.Idle:
+                if (GetRunningInputMethod() is { } ime) { SetStatus(_ => $"Tắt {ime}.exe trước khi bắt đầu quay."); break; }
+                BeginCountdown();
+                break;
             case RunState.Agent when _agent is { IsHost: true, Room: { } room } &&
                                      (room.CurrentSession is not null || Saving(room).Count == 0 && WaitingFor(room).Count == 0):
                 ToggleRound();
@@ -521,49 +525,81 @@ public partial class MainWindow : Window
     private void CheckGameFocusAndInputMethods()
     {
         if (_run is null || _state is not (RunState.Recording or RunState.Agent)) return;
-        string? processName = _settings.WindowProcess ?? (GameBox.SelectedItem as GameItem)?.WindowProcess;
-        if (!string.IsNullOrWhiteSpace(processName) && !IsSelectedGameForeground(processName))
-        {
-            var now = DateTime.UtcNow;
-            if ((now - _lastFocusCheckUtc).TotalMilliseconds >= 250)
-            {
-                _lastFocusCheckUtc = now;
-                var alert = new QualityAlert("GAME_FOCUS_LOST", QualityAlertSeverity.Critical,
-                    "Đã rời cửa sổ game", "Phát hiện Alt+Tab hoặc cửa sổ game mất focus. Đang dừng lượt quay để bảo toàn dữ liệu.");
-                _smartGuardOverlay?.UpdateAlerts((_qualityGuard?.Alerts ?? []).Append(alert).ToArray());
-                if (_state == RunState.Agent && _agent?.IsHost == true &&
-                    _agent.Room is { CurrentSession: { } session } && _focusLossSession != session)
-                {
-                    _focusLossSession = session;
-                    _ = StopPartyForFocusLossAsync(session);
-                }
-                else if (_state == RunState.Recording)
-                    StopRecording();
-            }
-            return;
-        }
-        _focusLossSession = null;
-        var runningIme = InputMethodProcesses.FirstOrDefault(name => Process.GetProcessesByName(name).Length > 0);
+        var runningIme = GetRunningInputMethod();
         if (runningIme is not null)
         {
-            var alert = new QualityAlert("INPUT_METHOD_RUNNING", QualityAlertSeverity.Warning,
-                "Phát hiện bộ gõ tiếng Việt", $"Đang chạy {runningIme}.exe; hãy tắt trước khi tiếp tục ghi hình.");
-            _smartGuardOverlay?.UpdateAlerts((_qualityGuard?.Alerts ?? []).Append(alert).ToArray());
+            _qualityGuard?.SetExternalAlert(new QualityAlert("INPUT_METHOD_RUNNING", QualityAlertSeverity.Warning,
+                "Phát hiện bộ gõ tiếng Việt", $"Đang chạy {runningIme}.exe; hãy tắt trước khi tiếp tục ghi hình."));
+        }
+        else
+        {
+            _qualityGuard?.ResolveExternalAlert("INPUT_METHOD_RUNNING", DateTime.UtcNow);
         }
     }
 
-    private async Task StopPartyForFocusLossAsync(string session)
+    private static string? GetRunningInputMethod()
     {
-        try
+        foreach (string name in InputMethodProcesses)
         {
-            if (_room?.Agent is { IsHost: true } agent && agent.Room?.CurrentSession == session)
-                await agent.ToggleRoundAsync(0, CancellationToken.None, session);
+            var processes = Process.GetProcessesByName(name);
+            bool found = processes.Length > 0;
+            foreach (var process in processes) process.Dispose();
+            if (found) return name;
         }
-        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
+        return null;
+    }
+
+    private void StartFocusMonitor(string? gameProcess, string sessionId)
+    {
+        StopFocusMonitor();
+        if (string.IsNullOrWhiteSpace(gameProcess)) return;
+        _focusGameProcess = gameProcess;
+        _focusSessionId = sessionId;
+        _focusLossSession = null;
+        // Dedicated worker timer: focus-loss detection does not wait for the one-second recording UI/status timer.
+        _focusMonitorTimer = new System.Threading.Timer(FocusMonitorTick, null, 100, 100);
+    }
+
+    private void FocusMonitorTick(object? state)
+    {
+        string? process = _focusGameProcess;
+        string? session = _focusSessionId;
+        if (process is null || session is null || _run is null) return;
+        if (IsSelectedGameForeground(process)) return;
+        if (Interlocked.CompareExchange(ref _focusLossSession, session, null) is not null) return;
+        Dispatcher.BeginInvoke(new Action(() => _ = HandleFocusLossAsync(session)));
+    }
+
+    private async Task HandleFocusLossAsync(string session)
+    {
+        if (_run is null || _focusSessionId != session) return;
+        var alert = new QualityAlert("GAME_FOCUS_LOST", QualityAlertSeverity.Critical,
+            "Đã rời cửa sổ game", "Phát hiện Alt+Tab hoặc cửa sổ game mất focus. Đang yêu cầu dừng lượt quay.");
+        _qualityGuard?.SetExternalAlert(alert);
+        _smartGuardOverlay?.UpdateAlerts(_qualityGuard?.Alerts ?? [alert]);
+        SetStatus(_ => alert.Detail);
+
+        if (_state == RunState.Agent && _agent is { } agent)
         {
-            string error = e.Message;
-            Dispatcher.Invoke(() => SetStatus(t => t.RoundToggleFailed(error)));
+            bool sent = await agent.ReportFocusLostAsync(session, CancellationToken.None);
+            if (!sent && _run is not null)
+            {
+                SetStatus(_ => "Không gửi được tín hiệu dừng Party; máy này đang dừng và finalize cục bộ.");
+                StopRecording();
+            }
+            return;
         }
+
+        if (_state == RunState.Recording) StopRecording();
+    }
+
+    private void StopFocusMonitor()
+    {
+        _focusMonitorTimer?.Dispose();
+        _focusMonitorTimer = null;
+        _focusGameProcess = null;
+        _focusSessionId = null;
+        _focusLossSession = null;
     }
 
     private static bool IsSelectedGameForeground(string processName)
@@ -594,10 +630,11 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 
-    private void StartQualityGuard(CaptureRun run, string? gameProcess)
+    private void StartQualityGuard(CaptureRun run, string? gameProcess, string? sessionId = null)
     {
         StopQualityGuard();
         _qualityGuard = new QualityGuard(_settings.Fps);
+        StartFocusMonitor(gameProcess, sessionId ?? run.SessionDir);
         _lastQualityStatus = null;
         _lastQualityStatusAtUtc = null;
         // WDA_EXCLUDEFROMCAPTURE is verified for Windows.Graphics.Capture. OBS can use
@@ -635,6 +672,7 @@ public partial class MainWindow : Window
 
     private void StopQualityGuard()
     {
+        StopFocusMonitor();
         _qualityGuard = null;
         _lastQualityStatus = null;
         _lastQualityStatusAtUtc = null;
@@ -974,6 +1012,11 @@ public partial class MainWindow : Window
     private async void ToggleReady()
     {
         if (_room is not { } room) return;
+        if (!room.Agent.IsReady && GetRunningInputMethod() is { } ime)
+        {
+            SetStatus(_ => $"Tắt {ime}.exe trước khi sẵn sàng vào Party.");
+            return;
+        }
         await room.ToggleReadyAsync();
         if (_run is null) ShowAgentStatus();
     }
@@ -1035,7 +1078,7 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
-            StartQualityGuard(run, options.WindowProcess);
+            StartQualityGuard(run, options.WindowProcess, options.DirName);
             _clock.Start();
             ShowRecordingStatus();
         });
