@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -1107,6 +1106,11 @@ public partial class MainWindow : Window
     private async void ToggleRound()
     {
         if (_room is not { } room) return;
+        if (room.Agent.Room is { CurrentSession: null } && GetRunningInputMethod() is { } ime)
+        {
+            SetStatus(_ => $"Tắt {ime}.exe trước khi bắt đầu lượt Party.");
+            return;
+        }
         string? task = null;
         if (room.Agent.Room is { CurrentSession: null })
         {
