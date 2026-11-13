@@ -189,13 +189,13 @@ Rules:
 
 ### Implemented in the current G1.1 branch; CI build/tests must remain green
 - Basic QualityGuard: fresh FPS below 30, FFmpeg starvation/backpressure >=25%, duplicate/no-new-frame stall, FFmpeg/recorder errors, and missing heartbeat.
-- ResourceGuard threshold engine for system CPU/RAM, GPU 3D, GPU Video Encode, dedicated VRAM and GPU temperature; one-second sampling and five-second recovery/alert hold.
+- ResourceGuard threshold engine for system CPU/RAM, GPU 3D, GPU Video Encode, dedicated VRAM and GPU temperature; one-second sampling, live CPU/RAM/GPU status row on the overlay, and five-second recovery/alert hold.
 - Windows telemetry provider: CPU via GetSystemTimes; RAM via GlobalMemoryStatusEx; GPU 3D/Video Encode and dedicated adapter memory via PDH where available; NVIDIA encoder/VRAM/temperature via optional NVML. Unsupported sensors return unavailable/null, never fabricated zero.
 - Resource rules: GPU 3D alerts require FPS below 30; GPU Video Encode alerts require encoder starvation/backpressure. Resource pressure alone does not stop recording.
 - Focus monitoring on each recording client using a separate 100 ms worker timer; Host and non-Host send FocusLost for the active SessionId.
 - Protocol v6 FocusLost message; Orchestrator validates sender membership, active SessionId and starting/recording state, then ends the whole Party once with one server-stamped EndUtc using the existing Stop/finalize flow.
 - Orchestrator tests cover focus loss from Host and non-Host and assert both participants receive the same EndUtc.
-- UniKeyNT/UniKey/VietKeyNT/VietKey process detection; preflight blocks solo start, Party Ready and Host Party start while one is running; detection during recording warns without killing the process.
+- UniKeyNT/UniKey/VietKeyNT/VietKey process detection; preflight blocks solo start, Party Ready and Host Party start while one is running; a 500 ms room preflight monitor withdraws a non-Host member's Ready if an input method starts before the round; detection during recording warns without killing the process.
 - Basic WPF click-through/no-activate overlay that follows the selected game window; Windows capture exclusion must be confirmed before display. OBS mode remains fail-closed/disabled.
 - Deployment artifacts/workflow for a Linux x64 protocol-v6 Orchestrator image and Windows x64 G1.1 QA package.
 
