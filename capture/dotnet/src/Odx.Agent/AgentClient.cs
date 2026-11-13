@@ -759,6 +759,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving",
                     s.SessionId, reportedProblem), stop);
             };
+            if (gameGuard.GuardStopReason is { } existingReason)
+                _ = ReportGuardStopAsync(s.SessionId, "ARMA3_COMMAND_MENU", existingReason, stop);
+            else if (gameGuard.GameAlerts.Count > 0)
+            {
+                string? problem = gameGuard.GameAlerts.Where(a => a.Severity != QualityAlertSeverity.Info)
+                    .Select(a => $"{a.Code}: {a.Detail}").FirstOrDefault();
+                if (problem is not null) _ = SendAsync(new AgentState("recording", s.SessionId, problem), stop);
+            }
         }
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
         if (Clock is { } clock)
