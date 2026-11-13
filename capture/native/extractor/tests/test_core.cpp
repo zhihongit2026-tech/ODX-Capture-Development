@@ -121,24 +121,30 @@ TEST_CASE("Arma 3 log follows control.txt and matches the arma3_camera.csv fixtu
     std::istringstream rows(fixture);
     std::string row;
     std::getline(rows, row);
+    std::string expected = std::string(kArma3CameraHeader) + "\n";
     while (std::getline(rows, row) && row != kArma3EndLine) {
         auto comma = row.find(',');
         std::string payload = row.substr(comma + 1);
         REQUIRE(arma3_frame_ok(payload));
         log.write(std::stod(row.substr(0, comma)), payload);
+        expected += row + ",,,,,,,,,,,\n";
     }
     log.poll();
     std::filesystem::remove(control);
     log.poll();
     CHECK_FALSE(log.recording());
-    CHECK(read_file(out) == fixture);
+    CHECK(read_file(out) == expected);
 }
 
-TEST_CASE("Arma 3 frame payloads need 15 fields on one line") {
-    CHECK(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75"));
+TEST_CASE("Arma 3 frame payloads accept legacy camera rows and extended guard rows") {
+    const std::string camera = "INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75";
+    const std::string guard = camera + ",60.0,1,2,3,0.1,,0,2,2,1,7";
+    CHECK(arma3_frame_ok(camera));
+    CHECK(arma3_frame_ok(guard));
     CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3"));
-    CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75,1"));
-    CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75\nx"));
+    CHECK_FALSE(arma3_frame_ok(camera + ",1"));
+    CHECK_FALSE(arma3_frame_ok(guard + ",1"));
+    CHECK_FALSE(arma3_frame_ok(guard + "\nx"));
 }
 
 TEST_CASE("format_double keeps full precision and a decimal point") {
