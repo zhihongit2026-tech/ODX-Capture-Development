@@ -43,7 +43,10 @@ public sealed class Arma3GuardEvaluator
         _telemetryAvailable = true;
         Clear("ARMA3_TELEMETRY_NOT_VERIFIED", nowUtc);
         if (sample.SampleId == 0 || sample.SampleId == _lastSampleId)
+        {
+            Expire(nowUtc);
             return new Arma3GuardUpdate(Alerts, _stopReason, !before.SequenceEqual(Snapshot()));
+        }
         _lastSampleId = sample.SampleId;
 
         if (_initialCameraView is null) _initialCameraView = sample.CameraView;
@@ -129,6 +132,7 @@ public sealed class Arma3GuardEvaluator
             else _movementRecoverySamples = 0;
         }
 
+        Expire(nowUtc);
         Expire(nowUtc);
         return new Arma3GuardUpdate(Alerts, _stopReason, !before.SequenceEqual(Snapshot()));
     }
