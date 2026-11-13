@@ -241,8 +241,6 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             Interlocked.Exchange(ref round.Finalized, 1);
             RoundCancelled?.Invoke(round.Record.SessionId);
         }
-        if (effects.Started is { } started)
-            _ = AutoEndRoomRoundAsync(started);
         if (effects.Countdown is { } counting)
             _ = Task.Delay(counting.Record.CountdownMs).ContinueWith(_ => CountdownEndedAsync(counting), TaskScheduler.Default).Unwrap();
     }
