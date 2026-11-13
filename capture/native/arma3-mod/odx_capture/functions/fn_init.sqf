@@ -22,7 +22,7 @@ addMissionEventHandler ["Draw3D", {
         ODX_guardPlayerAlive = if (alive player) then { 1 } else { 0 };
         ODX_guardPlayerPos = getPosASL player;
         ODX_guardPlayerSpeed = if (ODX_guardPlayerAlive == 1) then {
-            vectorMagnitude velocity (vehicle player)
+            vectorMagnitude (velocity (vehicle player))
         } else {
             0
         };
