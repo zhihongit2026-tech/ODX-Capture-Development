@@ -37,7 +37,8 @@ public sealed record RunResult(string SessionDir, bool CaptureOk, RecorderStatus
     IReadOnlyList<string> ToolErrors, BuildResult? Build, string? Failure = null, VideoFinalize.Result? Finalize = null,
     CaptureReport? Report = null)
 {
-    public bool Ok => CaptureOk && (Build is null || (Build.Error is null && Build.Issues.All(i => i.Severity != Issue.ErrorSeverity)));
+    public bool Ok => CaptureOk && (Build is null || (Build.Error is null && Build.Issues.All(i => i.Severity != Issue.ErrorSeverity))) &&
+                      Report?.Verdict != CaptureReport.Failed;
 }
 
 /// <param name="Error">Why the session could not be built; null when it was built and validated.</param>
