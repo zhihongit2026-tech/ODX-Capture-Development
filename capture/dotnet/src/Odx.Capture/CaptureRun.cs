@@ -231,24 +231,27 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
     private void StartArma3GuardMonitor()
     {
         if (_arma3Control is null) return;
-        _arma3GuardEvaluator = new Arma3GuardEvaluator();
-        _arma3GuardMonitor = new Arma3GuardMonitor();
-        _arma3GuardStop = new CancellationTokenSource();
-        _arma3GuardMonitor.SampleReceived += sample =>
+        var evaluator = new Arma3GuardEvaluator();
+        var monitor = new Arma3GuardMonitor();
+        var guardStop = new CancellationTokenSource();
+        _arma3GuardEvaluator = evaluator;
+        _arma3GuardMonitor = monitor;
+        _arma3GuardStop = guardStop;
+        monitor.SampleReceived += sample =>
         {
-            var update = _arma3GuardEvaluator.Observe(sample, DateTime.UtcNow);
+            var update = evaluator.Observe(sample, DateTime.UtcNow);
             if (update.Changed) PublishGameAlerts(update.Alerts);
             if (update.StopReason is { } reason &&
                 Interlocked.CompareExchange(ref _guardStopReason, reason, null) is null)
                 GuardStopRequested?.Invoke(reason);
         };
-        _arma3GuardMonitor.TelemetryUnavailable += () =>
+        monitor.TelemetryUnavailable += () =>
         {
-            var update = _arma3GuardEvaluator.MarkTelemetryUnavailable(DateTime.UtcNow);
+            var update = evaluator.MarkTelemetryUnavailable(DateTime.UtcNow);
             if (update.Changed) PublishGameAlerts(update.Alerts);
         };
         string rawLog = CaptureFolder.Raw(SessionDir, Arma3Camera.RawLog);
-        _arma3GuardTask = Task.Run(() => _arma3GuardMonitor.RunAsync(rawLog, _arma3GuardStop.Token));
+        _arma3GuardTask = Task.Run(() => monitor.RunAsync(rawLog, guardStop.Token));
     }
 
     private void PublishGameAlerts(IReadOnlyList<QualityAlert> alerts)
