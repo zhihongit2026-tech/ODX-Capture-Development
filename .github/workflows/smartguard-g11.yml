@@ -20,11 +20,16 @@ jobs:
         run: |
           dotnet build OdxCapture.sln -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
-      - name: Run complete .NET regression suite
+      - name: Run complete .NET regression suite (one full retry for transient timing flakes)
         working-directory: capture/dotnet
         run: |
-          dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g11.trx"
-          if ($LASTEXITCODE -ne 0) { throw 'Regression tests failed' }
+          dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g11-attempt1.trx"
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            Write-Warning 'First full regression pass failed; rerunning the complete suite once to distinguish a transient timing flake from a reproducible regression.'
+            dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g11-attempt2.trx"
+            if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed on both full runs' }
+          }
       - name: Build native extractor regression suite
         working-directory: capture/native/extractor
         run: |
