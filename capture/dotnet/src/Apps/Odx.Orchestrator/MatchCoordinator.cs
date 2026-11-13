@@ -121,18 +121,6 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case CloseRoom when room is not null && room.IsHost(link):
                 Close(room, effects);
                 break;
-            case FocusLost focus when room is not null &&
-                                          room.Current is { Counting: false } active &&
-                                          active.Record.SessionId == focus.SessionId &&
-                                          active.IndexOf(link.Id) >= 0 &&
-                                          link.State is "starting" or "recording":
-                log.LogWarning("focus lost by {Player} in {Session}; stopping the whole Party", link.Id, focus.SessionId);
-                EndRound(room, NtpResponder.NowUnixMs(), "focus_lost", "focus_lost", effects);
-                break;
-            case FocusLost focus:
-                // A stale, duplicate, non-member or wrong-session signal must never stop a later round.
-                log.LogWarning("ignored stale focus-loss signal from {Player} for {Session}", link.Id, focus.SessionId);
-                break;
             case ToggleRound when room is not null && room.IsHost(link) && room.Current is null && Saving(room) is { Count: > 0 } saving:
                 effects.Sends.Add((link, new RoomError($"still saving the last round: {string.Join(", ", saving.Select(a => a.Hello.Name))}")));
                 break;
