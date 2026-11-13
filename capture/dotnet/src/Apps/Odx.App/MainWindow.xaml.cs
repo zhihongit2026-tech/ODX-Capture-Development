@@ -725,11 +725,10 @@ public partial class MainWindow : Window
     private void StopQualityGuard()
     {
         StopFocusMonitor();
-        bool holdFocusAlert = _focusAlertAtUtc is DateTime focusAt &&
-            _qualityGuard?.Alerts.Any(a => a.Code == "GAME_FOCUS_LOST") == true;
-        TimeSpan focusHold = holdFocusAlert
-            ? TimeSpan.FromSeconds(5) - (DateTime.UtcNow - focusAt)
-            : TimeSpan.Zero;
+        TimeSpan focusHold = TimeSpan.Zero;
+        if (_focusAlertAtUtc is DateTime focusAt &&
+            _qualityGuard?.Alerts.Any(a => a.Code == "GAME_FOCUS_LOST") == true)
+            focusHold = TimeSpan.FromSeconds(5) - (DateTime.UtcNow - focusAt);
         _focusAlertAtUtc = null;
         _qualityGuard = null;
         _resourceGuard = new ResourceGuard();
