@@ -649,10 +649,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
 
         var notice = await focusNotice.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Contains(notice.Members, m => m.Problem == AgentClient.FocusLostProblem(sessionId!));
-        // Protocol 5 has no FocusLost command: the Host relays the existing RoomUpdate marker
-        // through the existing host-only ToggleRound stop command.
-        await host.ToggleRoundAsync(0, default, sessionId);
-
+        // The Host AgentClient automatically relays the Protocol 5 RoomUpdate marker using ToggleRound.
         var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
         var record = JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!;
         Assert.Equal("player_stop:p1", record.EndReason);
