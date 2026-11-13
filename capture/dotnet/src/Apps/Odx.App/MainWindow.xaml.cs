@@ -719,7 +719,7 @@ public partial class MainWindow : Window
                     _qualityGuard?.ResolveExternalAlert(alert.Code, _focusAlertAtUtc.Value);
                     _smartGuardOverlay?.UpdateAlerts((_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameGuard.GameAlerts).ToArray());
                     SetStatus(_ => reason);
-                    if (solo && _state is RunState.Starting or RunState.Recording) StopRecording();
+                    if (solo && (_state is RunState.Starting or RunState.Recording)) StopRecording();
                 }));
             }
             catch (InvalidOperationException) { }
@@ -746,7 +746,7 @@ public partial class MainWindow : Window
             _lastQualityStatusAtUtc = statusAt;
         }
         guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
-        var gameAlerts = run is IGameGuardCaptureRun gameGuard ? gameGuard.GameAlerts : [];
+        IReadOnlyList<QualityAlert> gameAlerts = run is IGameGuardCaptureRun gameGuard ? gameGuard.GameAlerts : Array.Empty<QualityAlert>();
         _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceAlerts).Concat(gameAlerts).ToArray());
         ScheduleResourceSample(guard);
         var allAlerts = guard.Alerts.Concat(_resourceAlerts).Concat(gameAlerts).ToArray();
