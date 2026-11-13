@@ -67,6 +67,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _roomAutoStop;
     private string? _roomAutoStopSession;
     private QualityGuard? _qualityGuard;
+    private ResourceGuard _resourceGuard = new();
+    private readonly WindowsResourceSampler _resourceSampler = new();
+    private int _resourceSamplePending;
     private RecorderStatus? _lastQualityStatus;
     private DateTime? _lastQualityStatusAtUtc;
     private SmartGuardOverlay? _smartGuardOverlay;
@@ -225,6 +228,7 @@ public partial class MainWindow : Window
         CancelAutoStop();
         CancelRoomAutoStop();
         StopQualityGuard();
+        _resourceSampler.Dispose();
         if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
         _tray.Dispose();
         _packets.Dispose();
@@ -634,6 +638,7 @@ public partial class MainWindow : Window
     {
         StopQualityGuard();
         _qualityGuard = new QualityGuard(_settings.Fps);
+        _resourceGuard = new ResourceGuard();
         StartFocusMonitor(gameProcess, sessionId ?? run.SessionDir);
         _lastQualityStatus = null;
         _lastQualityStatusAtUtc = null;
@@ -651,7 +656,9 @@ public partial class MainWindow : Window
     private void PollQualityGuard()
     {
         if (_qualityGuard is not { } guard || _run is not { } run) return;
-        guard.Expire(DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        guard.Expire(now);
+        _resourceGuard.Expire(now);
         CheckGameFocusAndInputMethods();
         var status = run.LastStatus;
         if (status is not null && !ReferenceEquals(status, _lastQualityStatus))
@@ -662,18 +669,57 @@ public partial class MainWindow : Window
             _lastQualityStatusAtUtc = now;
         }
         guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
-        _smartGuardOverlay?.UpdateAlerts(guard.Alerts);
-        if (guard.Alerts.Count > 0)
+        _smartGuardOverlay?.UpdateAlerts(guard.Alerts.Concat(_resourceGuard.Alerts).ToArray());
+        ScheduleResourceSample(guard);
+        if (guard.Alerts.Count > 0 || _resourceGuard.Alerts.Count > 0)
         {
             string message = string.Join(" | ", guard.Alerts.Select(a => a.Title + ": " + a.Detail));
             SetStatus(_ => message);
         }
     }
 
+    private void ScheduleResourceSample(QualityGuard qualityGuard)
+    {
+        if (Interlocked.Exchange(ref _resourceSamplePending, 1) != 0) return;
+        double? freshFps = qualityGuard.LastFreshFps;
+        double? encoderStarvation = qualityGuard.LastEncoderStarvationPercent;
+        _ = Task.Run(() =>
+        {
+            IReadOnlyList<QualityAlert> resourceAlerts;
+            try
+            {
+                var sample = _resourceSampler.Sample(freshFps, encoderStarvation);
+                DateTime now = DateTime.UtcNow;
+                _resourceGuard.Observe(sample, now);
+                _resourceGuard.Expire(now);
+                resourceAlerts = _resourceGuard.Alerts.ToArray();
+            }
+            catch
+            {
+                // Telemetry failures must not interfere with capture or FFmpeg. Unsupported sensors stay unavailable.
+                resourceAlerts = _resourceGuard.Alerts.ToArray();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _resourceSamplePending, 0);
+            }
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_qualityGuard != qualityGuard || _run is null) return;
+                var alerts = qualityGuard.Alerts.Concat(resourceAlerts).ToArray();
+                _smartGuardOverlay?.UpdateAlerts(alerts);
+                if (alerts.Length > 0)
+                    SetStatus(_ => string.Join(" | ", alerts.Select(a => a.Title + ": " + a.Detail)));
+            }));
+        });
+    }
+
     private void StopQualityGuard()
     {
         StopFocusMonitor();
         _qualityGuard = null;
+        _resourceGuard = new ResourceGuard();
         _lastQualityStatus = null;
         _lastQualityStatusAtUtc = null;
         if (_smartGuardOverlay is { } overlay)
