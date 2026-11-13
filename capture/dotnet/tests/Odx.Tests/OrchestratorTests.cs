@@ -636,12 +636,26 @@ public sealed class OrchestratorTests : IAsyncLifetime
         }
         Assert.NotNull(sessionId);
 
+        var focusNotice = new TaskCompletionSource<RoomUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomChanged += update =>
+        {
+            if (update?.CurrentSession == sessionId &&
+                update.Members.Any(m => m.Problem == AgentClient.FocusLostProblem(sessionId!)))
+                focusNotice.TrySetResult(update);
+        };
+
         AgentClient reporter = hostTriggers ? host : member;
         Assert.True(await reporter.ReportFocusLostAsync(sessionId!, default));
 
+        var notice = await focusNotice.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains(notice.Members, m => m.Problem == AgentClient.FocusLostProblem(sessionId!));
+        // Protocol 5 has no FocusLost command: the Host relays the existing RoomUpdate marker
+        // through the existing host-only ToggleRound stop command.
+        await host.ToggleRoundAsync(0, default, sessionId);
+
         var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
         var record = JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!;
-        Assert.Equal("focus_lost", record.EndReason);
+        Assert.Equal("player_stop:p1", record.EndReason);
         Assert.NotNull(record.EndUtcMs);
         Assert.Equal(2, record.Players.Count);
         var hostTimes = FakeCapture.RoundTimes["p1"];
