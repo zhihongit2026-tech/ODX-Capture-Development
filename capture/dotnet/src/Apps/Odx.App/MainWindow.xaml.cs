@@ -65,6 +65,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _autoStop;
     private CancellationTokenSource? _roomAutoStop;
     private string? _roomAutoStopSession;
+    private QualityGuard? _qualityGuard;
+    private RecorderStatus? _lastQualityStatus;
+    private DateTime? _lastQualityStatusAtUtc;
+    private SmartGuardOverlay? _smartGuardOverlay;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -112,7 +116,7 @@ public partial class MainWindow : Window
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
-        _clock.Tick += (_, _) => ShowRecordingStatus();
+        _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); };
 
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
@@ -215,6 +219,7 @@ public partial class MainWindow : Window
     {
         CancelAutoStop();
         CancelRoomAutoStop();
+        StopQualityGuard();
         if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
         _tray.Dispose();
         _packets.Dispose();
@@ -460,6 +465,7 @@ public partial class MainWindow : Window
         {
             if (_run != run || _state != RunState.Starting) return;
             _runStarted = DateTime.Now;
+            StartQualityGuard(run, _settings.WindowProcess ?? (GameBox.SelectedItem as GameItem)?.WindowProcess);
             SetState(RunState.Recording);
             ScheduleAutoStop(run);
             _clock.Start();
@@ -508,6 +514,52 @@ public partial class MainWindow : Window
             SetStatus(t => t.PhaseStatus(run.Phase, run.FinalizePercent));
     }
 
+    private void StartQualityGuard(CaptureRun run, string? gameProcess)
+    {
+        StopQualityGuard();
+        _qualityGuard = new QualityGuard(_settings.Fps);
+        _lastQualityStatus = null;
+        _lastQualityStatusAtUtc = null;
+        if (!string.IsNullOrWhiteSpace(gameProcess))
+        {
+            _smartGuardOverlay = new SmartGuardOverlay();
+            _smartGuardOverlay.UpdateAlerts([]);
+            _smartGuardOverlay.Start(gameProcess);
+        }
+    }
+
+    private void PollQualityGuard()
+    {
+        if (_qualityGuard is not { } guard || _run is not { } run) return;
+        var status = run.LastStatus;
+        if (status is not null && !ReferenceEquals(status, _lastQualityStatus))
+        {
+            var now = DateTime.UtcNow;
+            guard.Observe(status, now);
+            _lastQualityStatus = status;
+            _lastQualityStatusAtUtc = now;
+        }
+        guard.CheckHeartbeat(DateTime.UtcNow, _lastQualityStatusAtUtc);
+        _smartGuardOverlay?.UpdateAlerts(guard.Alerts);
+        if (guard.Alerts.Count > 0)
+        {
+            string message = string.Join(" | ", guard.Alerts.Select(a => a.Title + ": " + a.Detail));
+            SetStatus(_ => message);
+        }
+    }
+
+    private void StopQualityGuard()
+    {
+        _qualityGuard = null;
+        _lastQualityStatus = null;
+        _lastQualityStatusAtUtc = null;
+        if (_smartGuardOverlay is { } overlay)
+        {
+            overlay.Close();
+            _smartGuardOverlay = null;
+        }
+    }
+
     private void CancelAutoStop()
     {
         var previous = _autoStop;
@@ -547,6 +599,7 @@ public partial class MainWindow : Window
     private void OnRunCompleted(RunResult result)
     {
         CancelAutoStop();
+        StopQualityGuard();
         _run = null;
         foreach (string line in RoomSession.LogLines(Path.GetFileName(result.SessionDir), result)) _log.Write(line);
         SetState(RunState.Idle, t => t.Describe(result));
@@ -897,6 +950,7 @@ public partial class MainWindow : Window
             _run = run;
             _roundResult = null;
             _runStarted = DateTime.Now;
+            StartQualityGuard(run, options.WindowProcess);
             _clock.Start();
             ShowRecordingStatus();
         });
@@ -909,6 +963,7 @@ public partial class MainWindow : Window
 
     private void OnAgentRunCompleted(RunResult result)
     {
+        StopQualityGuard();
         _run = null;
         _clock.Stop();
         // The notice comes once the capture is built (RoundKept).
