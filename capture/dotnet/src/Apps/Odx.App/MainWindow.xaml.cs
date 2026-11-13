@@ -75,7 +75,6 @@ public partial class MainWindow : Window
     private DateTime? _lastQualityStatusAtUtc;
     private SmartGuardOverlay? _smartGuardOverlay;
     private string? _focusLossSession;
-    private string? _partyFocusStopRequestedSession;
     private DateTime? _focusAlertAtUtc;
     private string? _focusGameProcess, _focusSessionId;
     private System.Threading.Timer? _focusMonitorTimer;
@@ -946,7 +945,6 @@ public partial class MainWindow : Window
                 return;
             }
             RoomBox.Text = update.Code;
-            HandlePartyFocusLoss(room, update);
             UpdateRoomAutoStop(room, update);
             SetState(_state);
             if (_run is null) ShowAgentStatus();
@@ -1003,48 +1001,6 @@ public partial class MainWindow : Window
 
     private static readonly string ZeroTierTray =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ZeroTier", "One", "zerotier_desktop_ui.exe");
-
-    /// <summary>
-    /// Protocol 5 relay: every member reports focus loss in the existing AgentState. The server broadcasts
-    /// the marker through its existing RoomUpdate; only the Host sends the already-supported ToggleRound stop.
-    /// This keeps the deployed Orchestrator unchanged.
-    /// </summary>
-    private void HandlePartyFocusLoss(RoomSession room, RoomUpdate update)
-    {
-        if (update.CurrentSession is not { } session)
-        {
-            Interlocked.Exchange(ref _partyFocusStopRequestedSession, null);
-            return;
-        }
-        if (!room.Agent.IsHost || update.Countdown) return;
-
-        string marker = AgentClient.FocusLostProblem(session);
-        var reporter = update.Members.FirstOrDefault(member => member.Problem == marker);
-        if (reporter is null) return;
-
-        string? previous = Volatile.Read(ref _partyFocusStopRequestedSession);
-        if (previous == session) return;
-        if (Interlocked.CompareExchange(ref _partyFocusStopRequestedSession, session, previous) != previous) return;
-
-        SetStatus(_ => $"{reporter.Name} đã Alt+Tab/mất focus. Host đang dừng toàn bộ Party.");
-        _ = StopPartyForFocusLossAsync(room, session);
-    }
-
-    private async Task StopPartyForFocusLossAsync(RoomSession room, string session)
-    {
-        try
-        {
-            // Re-check immediately before sending: ToggleRound is a Protocol 5 toggle, so never send it
-            // after this session has already ended (that would start a new round).
-            if (_room != room || !room.Agent.IsHost || room.Agent.Room?.CurrentSession != session) return;
-            await room.ToggleRoundAsync(0, session);
-        }
-        catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException or InvalidOperationException)
-        {
-            Interlocked.CompareExchange(ref _partyFocusStopRequestedSession, null, session);
-            SetStatus(_ => $"Không gửi được lệnh dừng Party sau khi mất focus: {e.Message}");
-        }
-    }
 
     // Host-side safety timer, compatible with the deployed orchestrator: host sends the existing
     // ToggleRound stop command so the server broadcasts one common Stop to every room member.
