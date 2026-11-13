@@ -123,7 +123,6 @@ public static class Arma3Camera
         double D(int index) => Frames.ParseDouble(fields[index]);
         int I(int index) => int.Parse(fields[index], System.Globalization.CultureInfo.InvariantCulture);
         bool B(int index) => fields[index] == "1";
-        if (long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture) == 0) return null;
         return new Arma3GuardSample(D(0), fields[1], D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
             B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture));
     }
