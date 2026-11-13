@@ -662,7 +662,6 @@ public partial class MainWindow : Window
         if (_qualityGuard is not { } guard || _run is not { } run) return;
         var now = DateTime.UtcNow;
         guard.Expire(now);
-        _resourceGuard.Expire(now);
         CheckGameFocusAndInputMethods();
         var status = run.LastStatus;
         if (status is not null && !ReferenceEquals(status, _lastQualityStatus))
@@ -710,15 +709,20 @@ public partial class MainWindow : Window
                 Interlocked.Exchange(ref _resourceSamplePending, 0);
             }
 
-            Dispatcher.BeginInvoke(new Action(() =>
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            try
             {
-                if (_qualityGuard != qualityGuard || _run is null) return;
-                _resourceAlerts = resourceAlerts.ToArray();
-                var alerts = qualityGuard.Alerts.Concat(_resourceAlerts).ToArray();
-                _smartGuardOverlay?.UpdateAlerts(alerts);
-                if (alerts.Length > 0)
-                    SetStatus(_ => string.Join(" | ", alerts.Select(a => a.Title + ": " + a.Detail)));
-            }));
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_qualityGuard != qualityGuard || _run is null) return;
+                    _resourceAlerts = resourceAlerts.ToArray();
+                    var alerts = qualityGuard.Alerts.Concat(_resourceAlerts).ToArray();
+                    _smartGuardOverlay?.UpdateAlerts(alerts);
+                    if (alerts.Length > 0)
+                        SetStatus(_ => string.Join(" | ", alerts.Select(a => a.Title + ": " + a.Detail)));
+                }));
+            }
+            catch (InvalidOperationException) { }
         });
     }
 
