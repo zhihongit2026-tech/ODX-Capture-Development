@@ -520,7 +520,10 @@ public partial class MainWindow : Window
         _qualityGuard = new QualityGuard(_settings.Fps);
         _lastQualityStatus = null;
         _lastQualityStatusAtUtc = null;
-        if (!string.IsNullOrWhiteSpace(gameProcess))
+        // WDA_EXCLUDEFROMCAPTURE is verified for Windows.Graphics.Capture. OBS can use
+        // Display Capture or injected Game Capture paths that may still include foreign overlays.
+        // Fail closed in OBS mode rather than risk contaminating the recorded video.
+        if (!_settings.RecordWithObs && !string.IsNullOrWhiteSpace(gameProcess))
         {
             _smartGuardOverlay = new SmartGuardOverlay();
             _smartGuardOverlay.UpdateAlerts([]);
