@@ -777,8 +777,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         if (etl is not null) await StopPacketsAsync(etl, result.SessionDir, stop);
         string? retakeReason;
         lock (_gate) retakeReason = _retakeRequiredSessionId == s.SessionId ? _retakeRequiredReason : null;
-        if (retakeReason is not null && result.Report is { } report)
-            result = result with { Report = report with { Failure = retakeReason } };
+        if (retakeReason is not null && result.Report is { } reportForRetake)
+            result = result with { Report = reportForRetake with { Failure = retakeReason } };
         if (Volatile.Read(ref _stopReason) == Stop.Cancelled)
         {
             lock (_gate)
