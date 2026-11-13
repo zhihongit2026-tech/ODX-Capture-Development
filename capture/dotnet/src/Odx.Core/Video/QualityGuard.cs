@@ -10,12 +10,13 @@ public sealed record QualityAlert(string Code, QualityAlertSeverity Severity, st
 /// </summary>
 public sealed class QualityGuard
 {
-    private const double FpsWarningRatio = 0.90;
-    private const double FpsCriticalRatio = 0.75;
+    private const double FpsAlertFloor = 30.0;
     private const double FreezeWarningRatio = 0.80;
-    private const double StarvedWarningRatio = 0.10;
+    private const double StarvedCriticalRatio = 0.25;
+    private static readonly TimeSpan AlertHold = TimeSpan.FromSeconds(5);
     private readonly double _targetFps;
     private readonly Dictionary<string, QualityAlert> _alerts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTime> _clearAfter = new(StringComparer.Ordinal);
     private RecorderStatus? _previous;
     private DateTime _previousAtUtc;
     private int _lowFpsSamples, _freezeSamples, _starvedSamples, _noFrameSamples;
@@ -26,10 +27,13 @@ public sealed class QualityGuard
         _targetFps = targetFps;
     }
 
-    public IReadOnlyList<QualityAlert> Alerts => _alerts.Values
-        .OrderByDescending(a => a.Severity)
-        .ThenBy(a => a.Code, StringComparer.Ordinal)
-        .ToArray();
+    public IReadOnlyList<QualityAlert> Alerts => _alerts.Values.OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
+
+    public void Expire(DateTime nowUtc)
+    {
+        foreach (var code in _clearAfter.Where(x => x.Value <= nowUtc).Select(x => x.Key).ToArray())
+        { _clearAfter.Remove(code); _alerts.Remove(code); }
+    }
 
     public void Observe(RecorderStatus status, DateTime receivedAtUtc)
     {
@@ -95,27 +99,20 @@ public sealed class QualityGuard
                 else
                 {
                     _noFrameSamples = 0;
-                    Clear("VIDEO_STALLED");
+                    Clear("VIDEO_STALLED", receivedAtUtc);
                 }
                 long starved = Math.Max(0, status.Starved - _previous.Starved);
                 double freshFps = Math.Max(0, frames - duplicates) / elapsed;
                 double duplicateRatio = expected > 0 ? duplicates / expected : 0;
                 double starvedRatio = expected > 0 ? starved / expected : 0;
 
-                if (freshFps < _targetFps * FpsWarningRatio)
+                if (freshFps < FpsAlertFloor)
                 {
                     _lowFpsSamples++;
-                    var severity = freshFps < _targetFps * FpsCriticalRatio && _lowFpsSamples >= 2
-                        ? QualityAlertSeverity.Critical : QualityAlertSeverity.Warning;
-                    if (_lowFpsSamples >= 2)
-                        Set(new QualityAlert("FPS_DROP", severity, "FPS đầu vào bị giảm",
-                            $"Nguồn hình đạt khoảng {freshFps:0.#}/{_targetFps:0.#} FPS trong {elapsed:0.0} giây."));
+                    Set(new QualityAlert("FPS_DROP", QualityAlertSeverity.Critical, "FPS dưới 30",
+                        $"Nguồn hình đạt khoảng {freshFps:0.#} FPS; ngưỡng yêu cầu tối thiểu là 30 FPS."));
                 }
-                else
-                {
-                    _lowFpsSamples = 0;
-                    Clear("FPS_DROP");
-                }
+                else { _lowFpsSamples = 0; Clear("FPS_DROP", receivedAtUtc); }
 
                 if (duplicateRatio >= FreezeWarningRatio)
                 {
@@ -128,24 +125,16 @@ public sealed class QualityGuard
                 else
                 {
                     _freezeSamples = 0;
-                    Clear("VIDEO_FREEZE");
+                    Clear("VIDEO_FREEZE", receivedAtUtc);
                 }
 
-                if (starvedRatio >= StarvedWarningRatio)
+                if (starvedRatio >= StarvedCriticalRatio)
                 {
                     _starvedSamples++;
-                    var severity = starvedRatio >= 0.25
-                        ? QualityAlertSeverity.Critical
-                        : _starvedSamples >= 2 ? QualityAlertSeverity.Warning : (QualityAlertSeverity?)null;
-                    if (severity is { } level)
-                        Set(new QualityAlert("FFMPEG_BACKPRESSURE", level, "FFmpeg xử lý không kịp",
-                            $"Bộ mã hóa bỏ lỡ {starved} khung hình ({starvedRatio:P0}) trong {elapsed:0.0} giây."));
+                    Set(new QualityAlert("FFMPEG_BACKPRESSURE", QualityAlertSeverity.Critical, "FFmpeg xử lý chậm nghiêm trọng",
+                        $"Bộ mã hóa bỏ lỡ {starved} khung hình ({starvedRatio:P0}) trong {elapsed:0.0} giây."));
                 }
-                else
-                {
-                    _starvedSamples = 0;
-                    Clear("FFMPEG_BACKPRESSURE");
-                }
+                else { _starvedSamples = 0; Clear("FFMPEG_BACKPRESSURE", receivedAtUtc); }
             }
         }
 
@@ -161,9 +150,13 @@ public sealed class QualityGuard
             Set(new QualityAlert("RECORDER_HEARTBEAT", QualityAlertSeverity.Critical,
                 "Mất tín hiệu bộ ghi hình", "Không nhận được trạng thái ghi hình mới trong hơn 2,5 giây."));
         else
-            Clear("RECORDER_HEARTBEAT");
+            Clear("RECORDER_HEARTBEAT", receivedAtUtc);
     }
 
-    private void Set(QualityAlert alert) => _alerts[alert.Code] = alert;
-    private void Clear(string code) => _alerts.Remove(code);
+    private void Set(QualityAlert alert) { _alerts[alert.Code] = alert; _clearAfter.Remove(alert.Code); }
+    private void Clear(string code, DateTime? nowUtc = null)
+    {
+        if (!_alerts.ContainsKey(code)) return;
+        _clearAfter.TryAdd(code, (nowUtc ?? DateTime.UtcNow) + AlertHold);
+    }
 }
