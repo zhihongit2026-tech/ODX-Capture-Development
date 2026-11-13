@@ -57,18 +57,23 @@ Implementation and interpretation:
 
 ## 3. Focus Guard - any member Alt+Tab stops the whole Party
 
-**Approved rule:** any participant, including Host, losing the selected game window's foreground focus during an active recording must signal the Orchestrator immediately. The Orchestrator ends the active round for every participant, including Host, on one shared end timestamp.
+**Approved rule:** any participant, including Host, losing the selected game window's foreground focus during an active recording must cause the whole Party to stop. Keep the deployed Orchestrator on **Protocol 5** and do not update the server.
 
+Protocol 5-compatible relay (no new WebSocket message and no server code/configuration update):
 - [ ] Monitor focus on every member machine; do not restrict monitoring to Host.
-- [ ] Detect Alt+Tab / selected game window losing foreground focus with low latency (target event-driven WinEvent hook or <=100-250 ms monitor, not a 1-second UI timer).
-- [ ] Add an explicit agent-to-Orchestrator focus-loss message containing active SessionId and reporting PlayerId (authenticated from the connection, not trusted from arbitrary payload).
-- [ ] Validate the signal: sender belongs to that room and active round; ignore stale, duplicate, wrong-session, or non-recording signals.
-- [ ] On the first valid signal, atomically end the round once; Orchestrator sends Stop to every participant and game server using one common EndUtc.
-- [ ] All clients, including Host and the reporting member, gracefully stop and finalize using the existing Stop path. Never kill FFmpeg.
-- [ ] Make repeated focus-loss signals idempotent.
-- [ ] If a member loses connectivity while reporting, locally stop safely and surface that synchronized Party stop could not be confirmed; test reconnect/failure behavior.
+- [ ] Detect Alt+Tab / selected game window losing foreground focus with low latency (dedicated 100 ms worker monitor).
+- [ ] The reporting client sends the existing `AgentState` message with state `recording` and a Problem marker `ODX_FOCUS_LOST|<SessionId>`; this uses the existing Protocol 5 schema.
+- [ ] The existing Protocol 5 Orchestrator stores that Problem and broadcasts it to every member through the existing `RoomUpdate`.
+- [ ] The Host monitors `RoomUpdate`; when a member's marker matches the currently active SessionId, the Host sends the existing host-only `ToggleRound` stop command exactly once.
+- [ ] This relay also applies when the Host itself Alt+Tabs: its own AgentState marker returns through RoomUpdate and triggers the same Host stop.
+- [ ] The existing Orchestrator stamps one common EndUtc and sends the existing Stop to every participant and game server.
+- [ ] All clients, including Host and reporting member, gracefully stop and finalize using the existing Stop path. Never kill FFmpeg.
+- [ ] Ignore stale markers for an earlier SessionId; repeated updates for the same session must not send multiple ToggleRound commands.
+- [ ] If the reporting client cannot send the marker, it locally stops safely and reports that synchronized Party stop could not be confirmed.
+- [ ] If the Host cannot receive RoomUpdate or cannot send ToggleRound, report the synchronization failure clearly; do not claim the whole Party stopped.
 - [ ] After focus returns, do not automatically resume the stopped take; require a new Ready/start cycle.
 - [ ] Solo recording focus loss uses the existing graceful local Stop and finalize path.
+- [ ] Protocol remains version 5; do not require a new server image, server deployment, second server, URL, access key, database, or ZeroTier change.
 
 ## 4. HUD Guard - game-specific HUD/UI compliance
 
@@ -112,7 +117,7 @@ Rules:
 - [ ] Identify the exact member and exact mismatch.
 - [ ] Block Ready/start for required mismatches until corrected.
 - [ ] Unknown/unmonitored/incompatible members are NOT PASS.
-- [ ] All participants use the same supported Smart Guard/Orchestrator protocol; version mismatch is explicitly rejected before round start.
+- [ ] All participants use the same Smart Guard client build compatible with the existing Protocol 5 Orchestrator; do not upgrade or replace the deployed server.
 - [ ] Analyze video locally on each participant machine. Send only status, event, confidence, and diagnostics to Orchestrator; do not upload raw gameplay video for AI analysis.
 
 ## 7. UniKey / VietKey Guard
@@ -192,12 +197,12 @@ Rules:
 - ResourceGuard threshold engine for system CPU/RAM, GPU 3D, GPU Video Encode, dedicated VRAM and GPU temperature; one-second sampling, live CPU/RAM/GPU status row on the overlay, and five-second recovery/alert hold.
 - Windows telemetry provider: CPU via GetSystemTimes; RAM via GlobalMemoryStatusEx; GPU 3D/Video Encode and dedicated adapter memory via PDH where available; NVIDIA encoder/VRAM/temperature via optional NVML. Unsupported sensors return unavailable/null, never fabricated zero.
 - Resource rules: GPU 3D alerts require FPS below 30; GPU Video Encode alerts require encoder starvation/backpressure. Resource pressure alone does not stop recording.
-- Focus monitoring on each recording client using a separate 100 ms worker timer; Host and non-Host send FocusLost for the active SessionId.
-- Protocol v6 FocusLost message; Orchestrator validates sender membership, active SessionId and starting/recording state, then ends the whole Party once with one server-stamped EndUtc using the existing Stop/finalize flow.
-- Orchestrator tests cover focus loss from Host and non-Host and assert both participants receive the same EndUtc.
+- Focus monitoring on each recording client using a separate 100 ms worker timer; Host and non-Host send a focus marker in the existing Protocol 5 AgentState message.
+- The unchanged Protocol 5 Orchestrator broadcasts the marker through RoomUpdate; the Host relays the stop with the existing ToggleRound command. The server stamps one common EndUtc and uses its existing Stop/finalize flow.
+- Integration tests cover focus loss from Host and non-Host, the RoomUpdate relay, and matching EndUtc for both participants.
 - UniKeyNT/UniKey/VietKeyNT/VietKey process detection; preflight blocks solo start, Party Ready and Host Party start while one is running; a 500 ms room preflight monitor withdraws a non-Host member's Ready if an input method starts before the round; detection during recording warns without killing the process.
 - Basic WPF click-through/no-activate overlay that follows the selected game window; Windows capture exclusion must be confirmed before display. OBS mode remains fail-closed/disabled.
-- Deployment artifacts/workflow for a Linux x64 protocol-v6 Orchestrator image and Windows x64 G1.1 QA package.
+- Windows x64 G1.1 QA package workflow only; no Orchestrator image or server deployment package is produced or required.
 
 ### Still incomplete or requires real-machine/game-specific acceptance
 - Overlay exclusion has not yet been proven in a real captured MP4 for every supported Windows Graphics Capture/OBS mode. OBS overlay remains disabled until a test proves exclusion.
@@ -209,6 +214,6 @@ Rules:
 - Stop/Retake workflow, accepted/failed take separation and non-destructive attempt history are not implemented.
 - Optional alert sound isolation from game/system audio is not implemented.
 - Runtime tests on actual Arma 3 sessions, Party members on separate PCs, low-spec machines, fullscreen/borderless modes and actual server deployment remain outstanding.
-- Protocol-v6 Orchestrator image is built as a QA artifact but is not deployed to the user's remote server. Do not update the Windows clients for Party use until the matching server image is deployed; protocol v5 and v6 clients are incompatible.
+- The deployed Orchestrator remains Protocol 5 and is not updated. G1.1 clients must remain Protocol 5 compatible and use the existing server URL, access key, database and ZeroTier configuration.
 
 **Release gate:** Keep the known-working ODX 0.3.5 Auto235 build intact. No merge/release of Smart Guard until CI, regression, package, server rollout and real-machine acceptance pass.
