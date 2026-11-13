@@ -44,7 +44,7 @@ public sealed partial class MatchCoordinator
         public bool IsHost(AgentLink a) => a.Id == HostPlayerId;
     }
 
-    private sealed class OpenRound(Room room, RoundRecord record)
+    private sealed class OpenRound(Room room, RoundRecord record, double autoStopUtcMs)
     {
         public Room Room { get; } = room;
         public RoundRecord Record { get; set; } = record;
@@ -56,7 +56,7 @@ public sealed partial class MatchCoordinator
         public string? Server { get; init; }
         public bool ServerDone { get; set; }
         public CancellationTokenSource? AutoStopCancellation { get; set; }
-        public double AutoStopUtcMs => RoundTiming.EndUtcMs(Record.StartUtcMs, Record.CountdownMs, options.RoundDuration.TotalMilliseconds);
+        public double AutoStopUtcMs { get; } = autoStopUtcMs;
         /// <summary>Players who lost their connection while recording it, kept until <see cref="OrchestratorOptions.ReconnectGrace"/>.</summary>
         public HashSet<string> Away { get; } = [];
 

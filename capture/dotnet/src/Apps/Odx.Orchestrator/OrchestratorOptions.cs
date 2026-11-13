@@ -1,3 +1,5 @@
+using Odx.Protocol;
+
 namespace Odx.Orchestrator;
 
 public sealed record OrchestratorOptions(string GameProfilePath, int HttpPort = 5180, int TimePort = 12300, int Fps = 30)

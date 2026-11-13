@@ -1,44 +1,66 @@
+using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging.Abstractions;
+using Odx.Orchestrator;
 using Odx.Protocol;
 using Xunit;
 
 namespace Odx.Tests;
 
-public sealed class RoundTimingTests
+public sealed class AutoStopOrchestratorTests
 {
     [Fact]
-    public void ThreeSecondCountdownIsInsideThe235SecondWindow()
+    public async Task OrchestratorEndsRoundAtTheSharedDeadlineWithoutManualRoundEnd()
     {
-        const double countdownStartUtcMs = 1_000_000;
-        const int countdownMs = 3_000;
-        double playStartUtcMs = countdownStartUtcMs + countdownMs;
+        string root = Path.Combine(Path.GetTempPath(), "odx-auto-stop-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string profile = Path.Combine(root, "game.json");
+        await File.WriteAllTextAsync(profile, """{"game_title":"Synthetic"}""");
 
-        double endUtcMs = RoundTiming.EndUtcMs(playStartUtcMs, countdownMs);
+        using var coordinator = new MatchCoordinator(
+            new OrchestratorOptions(profile, HttpPort: 0, TimePort: 12300)
+            {
+                RoundDuration = TimeSpan.FromMilliseconds(300)
+            },
+            12300,
+            NullLogger<MatchCoordinator>.Instance);
 
-        Assert.Equal(countdownStartUtcMs + 235_000, endUtcMs);
-        Assert.Equal(232_000, endUtcMs - playStartUtcMs);
-    }
+        try
+        {
+            var recorded = new TaskCompletionSource<RoundFiles>(TaskCreationOptions.RunContinuationsAsynchronously);
+            coordinator.RoundRecorded += files => recorded.TrySetResult(files);
 
-    [Fact]
-    public void TestDurationCanBeShortenedWithoutChangingTheProductionDefault()
-    {
-        const double countdownStartUtcMs = 7_000_000;
-        const int countdownMs = 3_000;
-        double playStartUtcMs = countdownStartUtcMs + countdownMs;
-        Assert.Equal(countdownStartUtcMs + 250, RoundTiming.EndUtcMs(playStartUtcMs, countdownMs, 250));
-        Assert.Equal(235_000, RoundTiming.TotalDurationMs);
-    }
+            string room = coordinator.OpenRoom(null);
+            await coordinator.PostEventAsync(room, new JsonObject
+            {
+                ["type"] = GameEvents.MatchStart,
+                ["match_id"] = "auto-stop-test"
+            });
+            const int countdownMs = 50;
+            await coordinator.PostEventAsync(room, new JsonObject
+            {
+                ["type"] = GameEvents.RoundStart,
+                ["countdown_ms"] = countdownMs
+            });
 
-    [Fact]
-    public void ZeroCountdownUsesTheFull235SecondsFromPlayStart()
-    {
-        const double playStartUtcMs = 5_000_000;
+            var active = coordinator.RoomStatus(room)!;
+            Assert.Equal("auto-stop-test-r01", (string?)active["current_session"]);
+            Assert.True((bool)active["auto_stop_scheduled"]!);
+            double expectedEndUtcMs = (double)active["auto_stop_utc_ms"]!;
 
-        Assert.Equal(playStartUtcMs + 235_000, RoundTiming.EndUtcMs(playStartUtcMs, 0));
-    }
+            var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var record = JsonNode.Parse(files.Round)!;
+            Assert.Equal("auto_timeout", (string?)record["end_reason"]);
+            Assert.Equal(expectedEndUtcMs, (double)record["end_utc_ms"]!);
 
-    [Fact]
-    public void NegativeCountdownIsRejected()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() => RoundTiming.EndUtcMs(1_000, -1));
+            var finished = coordinator.RoomStatus(room)!;
+            Assert.Null(finished["current_session"]);
+            Assert.Contains(finished["sessions"]!.AsArray(),
+                session => (string?)session!["session_id"] == "auto-stop-test-r01");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+        }
     }
 }

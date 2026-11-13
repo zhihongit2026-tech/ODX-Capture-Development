@@ -34,7 +34,10 @@ public sealed partial class MatchCoordinator
                     room.RoundNumber = s.Record.Round - 1;
                     continue;
                 }
-                var round = new OpenRound(room, s.Record) { Server = s.Server, ServerDone = s.ServerDone, Ended = s.State == "ended" };
+                double autoStopUtcMs = RoundTiming.EndUtcMs(s.Record.StartUtcMs, s.Record.CountdownMs,
+                    options.RoundDuration.TotalMilliseconds);
+                var round = new OpenRound(room, s.Record, autoStopUtcMs)
+                    { Server = s.Server, ServerDone = s.ServerDone, Ended = s.State == "ended" };
                 round.Events.AddRange(s.Events);
                 _rounds[s.SessionId] = round;
                 if (round.Ended) ended.Add(round);

@@ -94,7 +94,8 @@ public sealed partial class MatchCoordinator
         if (server is null && (room.Server is not null || _gameServers.Count > 1))
             log.LogWarning("{Session}: no game server records it (room bound to {Server}; connected: {Connected})", sid,
                 room.Server ?? "none", string.Join(", ", _gameServers.Keys));
-        var round = new OpenRound(room, record) { Counting = countdownMs > 0, Server = server?.Id };
+        double autoStopUtcMs = RoundTiming.EndUtcMs(record.StartUtcMs, countdownMs, options.RoundDuration.TotalMilliseconds);
+        var round = new OpenRound(room, record, autoStopUtcMs) { Counting = countdownMs > 0, Server = server?.Id };
         round.Events.AddRange(room.BetweenRounds);
         room.BetweenRounds.Clear();
         room.Current = round;
