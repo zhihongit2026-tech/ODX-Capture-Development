@@ -47,7 +47,7 @@ public sealed class Arma3GuardMonitor
                             string line = text[..newline].TrimEnd('\r');
                             pending.Remove(0, newline + 1);
                             if (Arma3Camera.ParseGuardSample(line) is not { } sample) continue;
-                            available = true;
+                            if (sample.SampleId > 0) available = true;
                             SampleReceived?.Invoke(sample);
                         }
                     }
