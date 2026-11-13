@@ -40,7 +40,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 {
     private static readonly TimeSpan Retry = TimeSpan.FromSeconds(5);
     public const string FocusLostProblemPrefix = "ODX_FOCUS_LOST|";
+    public const string GuardStopProblemPrefix = "ODX_GUARD_STOP|";
     public static string FocusLostProblem(string sessionId) => FocusLostProblemPrefix + sessionId;
+    public static string GuardStopProblem(string sessionId, string code) => GuardStopProblemPrefix + sessionId + "|" + code;
 
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private ClientWebSocket? _socket;
@@ -57,6 +59,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private readonly ConcurrentDictionary<long, double> _eventReceipts = new();
     private ICaptureRun? _run;
     private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId, _focusStopRequestedSession;
+    private string? _guardStopSessionId, _guardStopProblem, _retakeRequiredSessionId, _retakeRequiredReason;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -333,6 +336,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     /// A Protocol 5 RoomUpdate carries the focus-loss marker from any member. The Host relays it using
     /// the existing host-only ToggleRound command; this works independently of the UI and needs no server update.
     /// </summary>
+    /// <summary>
+    /// Protocol 5 RoomUpdate relay: any member's focus-loss or game-guard stop marker is broadcast by the
+    /// unchanged server. The Host sends the existing host-only ToggleRound command exactly once.
+    /// </summary>
     private void RelayProtocol5FocusStop(RoomUpdate update, CancellationToken stop)
     {
         if (update.CurrentSession is not { } session)
@@ -340,9 +347,25 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             Interlocked.Exchange(ref _focusStopRequestedSession, null);
             return;
         }
-        if (!IsHost || update.Countdown ||
-            !update.Members.Any(member => member.Problem == FocusLostProblem(session)))
-            return;
+
+        string guardPrefix = GuardStopProblemPrefix + session + "|";
+        var guardReporter = update.Members.FirstOrDefault(member => member.Problem?.StartsWith(guardPrefix, StringComparison.Ordinal) == true);
+        if (guardReporter is not null)
+        {
+            string code = guardReporter.Problem![guardPrefix.Length..];
+            string reason = code == "ARMA3_COMMAND_MENU"
+                ? "RETAKE_REQUIRED: Arma 3 command menu was open during recording. Close it with Backspace and record the whole Party again."
+                : $"RETAKE_REQUIRED: game guard stop ({code}). Record the whole Party again.";
+            lock (_gate)
+            {
+                _retakeRequiredSessionId = session;
+                _retakeRequiredReason = reason;
+            }
+        }
+
+        bool focusLost = update.Members.Any(member => member.Problem == FocusLostProblem(session));
+        bool guardStop = guardReporter is not null;
+        if (!IsHost || update.Countdown || (!focusLost && !guardStop)) return;
 
         string? previous = Volatile.Read(ref _focusStopRequestedSession);
         if (previous == session) return;
@@ -358,12 +381,12 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             // so a delayed marker can never start a new round after the original one has already ended.
             if (!IsHost || Room?.CurrentSession != session) return;
             await ToggleRoundAsync(0, stop, session);
-            Log?.Invoke($"focus lost in {session}: Host relayed the synchronized Party stop through Protocol 5");
+            Log?.Invoke($"guard/focus stop in {session}: Host relayed synchronized Party stop through Protocol 5");
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or InvalidOperationException or ObjectDisposedException)
         {
             Interlocked.CompareExchange(ref _focusStopRequestedSession, null, session);
-            Log?.Invoke($"focus lost in {session}: could not relay Party stop: {e.Message}");
+            Log?.Invoke($"guard/focus stop in {session}: could not relay Party stop: {e.Message}");
         }
     }
 
@@ -396,6 +419,51 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         }
 
         // If the existing Protocol 5 channel is unavailable, fail safe locally through the normal Stop path.
+        StopCapture();
+        return false;
+    }
+
+    /// <summary>
+    /// Reports a game-specific stop condition using the existing Protocol 5 AgentState. The Host receives the
+    /// marker in the existing RoomUpdate and relays the stop with the existing ToggleRound command.
+    /// </summary>
+    public async Task<bool> ReportGuardStopAsync(string sessionId, string code, string reason, CancellationToken stop)
+    {
+        if (!ToggleRound.IsValidSessionId(sessionId) ||
+            string.IsNullOrWhiteSpace(code) || code.Any(c => !(char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_')))
+            return false;
+
+        bool active;
+        string marker = GuardStopProblem(sessionId, code);
+        lock (_gate)
+        {
+            active = (_run is not null && _runSessionId == sessionId) || _startingSessionId == sessionId;
+            if (active)
+            {
+                _guardStopSessionId = sessionId;
+                _guardStopProblem = marker;
+            }
+        }
+        if (!active) return false;
+
+        var socket = _socket;
+        if (socket is not { State: WebSocketState.Open })
+        {
+            StopCapture();
+            return false;
+        }
+
+        try
+        {
+            await SendAsync(new AgentState("recording", $"guard stop: {reason}", marker), stop);
+            if (socket.State == WebSocketState.Open) return true;
+        }
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
+                                  e is OperationCanceledException && !stop.IsCancellationRequested)
+        {
+        }
+
+        // If Protocol 5 cannot carry the stop marker, fail safe locally through the normal graceful Stop path.
         StopCapture();
         return false;
     }
