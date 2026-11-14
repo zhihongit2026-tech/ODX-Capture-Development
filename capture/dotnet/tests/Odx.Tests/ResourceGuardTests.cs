@@ -44,17 +44,27 @@ public sealed class ResourceGuardTests
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
         for (int i = 0; i < 20; i++)
-            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 99, FreshFps: 60), t.AddSeconds(i));
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 99, GameFps: 60), t.AddSeconds(i));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D");
     }
 
     [Fact]
-    public void Gpu_3d_alert_requires_fps_below_30_and_uses_dwell_time()
+    public void Gpu_3d_alert_does_not_use_recorder_fps_or_trigger_at_game_fps_50()
+    {
+        var guard = new ResourceGuard();
+        var t = DateTime.UtcNow;
+        for (int i = 0; i <= 20; i++)
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 99, GameFps: 50), t.AddSeconds(i));
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D");
+    }
+
+    [Fact]
+    public void Gpu_3d_alert_requires_in_game_fps_below_50_and_uses_dwell_time()
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
         for (int i = 0; i <= 5; i++)
-            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, FreshFps: 25), t.AddSeconds(i));
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, GameFps: 49), t.AddSeconds(i));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D" && a.Severity == QualityAlertSeverity.Critical);
     }
 
