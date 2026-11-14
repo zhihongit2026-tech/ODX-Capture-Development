@@ -39,6 +39,12 @@ another case fails. Any failed case or cleanup still makes the overall run fail.
   minimums prevent the hosted desktop from clamping these sizes; assert actual
   content and raster dimensions within one output pixel. Render Overview at both
   the top and bottom so the Frames chart and roster appear in the evidence.
+- For wrapped TextBlocks, compare actual glyph ink bounds with the laid-out
+  control, retaining drawing transforms but ignoring clips while measuring.
+  Reformatting at rounded ActualWidth can produce different line breaks from WPF.
+  Keep the existing unwrapped text measurements and two-DIP tolerance. Render a
+  normal centered Vietnamese fixture and a clipped eight-DIP-height fixture;
+  the same ink audit must accept the first and detect vertical clipping in the second.
 - Show the conditional OBS connection rows in layout workers by enabling OBS
   only in the harness-owned test settings, with a dummy password for mask-glyph
   rendering. Audit TextBox/PasswordBox scroll viewports against rendered line and
@@ -58,6 +64,9 @@ another case fails. Any failed case or cleanup still makes the overall run fail.
 `summary.json` records packaged runs and the actual hosted OS. Each layout case
 has its own JSON and PNG files. Layout workers use the application built from
 the same checkout; they are distinct from the packaged executable smoke test.
+`*-text-metrics.json` records actual/desired sizes, unclipped ink bounds and the
+independent reflow measurements, including the text that caused an assertion.
+`*-ink-controls.json` and their PNGs record the positive/negative control results.
 The harness links the application's original icon and two dashboard image files
 as WPF resources so its entry assembly resolves the application's absolute pack
 URIs. Application XAML and typography still load from the actual app assembly.

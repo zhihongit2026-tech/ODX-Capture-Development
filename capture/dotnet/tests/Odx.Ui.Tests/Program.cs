@@ -339,6 +339,7 @@ internal static class Program
             AssertVisibility(window, 0);
             var tray = (System.Windows.Forms.NotifyIcon)typeof(Odx.App.MainWindow).GetField("_tray", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
             Require(tray.ContextMenuStrip?.Font.FontFamily.Name == "Segoe UI" && Math.Abs(tray.ContextMenuStrip.Font.SizeInPoints - 10.5) < 0.1, "Tray menu does not use the shared 14-DIP Segoe UI typography.");
+            evidence.Add(CheckWrappedInkControls((TextBlock)window.FindName("PartyRosterEmptyText"), output, id));
             for (int page = 0; page < Pages.Length; page++)
             {
                 if (page == 2 && !configured) continue;
@@ -413,25 +414,45 @@ internal static class Program
         var text = Descendants(content).OfType<TextBlock>().Where(t => VisibleWithin(t, content) && t.ActualWidth > 1 && t.ActualHeight > 1 && !string.IsNullOrWhiteSpace(t.Text) && !t.FontFamily.Source.Contains("MDL2", StringComparison.Ordinal)).ToArray();
         Require(text.Length >= minimumText && text.Any(t => HasVietnameseLetters(t.Text)), "Vietnamese content was not laid out: " + name);
         var renderedFonts = new HashSet<string>();
-        foreach (TextBlock block in text)
+        var textMetrics = new List<object>();
+        try
         {
-            Require(block.FontFamily.Source.StartsWith("Segoe UI", StringComparison.Ordinal), "Text is missing shared typography: " + block.Name);
-            Require(!block.Text.Contains('\uFFFD'), $"Replacement character in {block.Name}: {block.Text}");
-            var formatted = new FormattedText(block.Text, CultureInfo.GetCultureInfo("vi-VN"), block.FlowDirection,
-                new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch), block.FontSize, Brushes.White, VisualTreeHelper.GetDpi(block).PixelsPerDip);
-            double width = Math.Max(1, block.ActualWidth - block.Padding.Left - block.Padding.Right);
-            if (block.TextWrapping != TextWrapping.NoWrap) formatted.MaxTextWidth = width;
-            if (block.TextTrimming == TextTrimming.None)
+            foreach (TextBlock block in text)
             {
-                Require(block.TextWrapping != TextWrapping.NoWrap || formatted.Width <= width + 2, $"Horizontal text overflow: {name}/{block.Name}: {block.Text}");
-                Require(formatted.Height <= block.ActualHeight + 2, $"Vertical text clipping: {name}/{block.Name}: {block.Text}");
-            }
-            if (VisualTreeHelper.GetDrawing(block) is { } drawing)
-                foreach (GlyphRunDrawing glyph in Glyphs(drawing))
+                var formatted = new FormattedText(block.Text, CultureInfo.GetCultureInfo("vi-VN"), block.FlowDirection,
+                    new Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch), block.FontSize, Brushes.White, VisualTreeHelper.GetDpi(block).PixelsPerDip);
+                double width = Math.Max(1, block.ActualWidth - block.Padding.Left - block.Padding.Right);
+                if (block.TextWrapping != TextWrapping.NoWrap) formatted.MaxTextWidth = width;
+                var drawing = VisualTreeHelper.GetDrawing(block);
+                var ink = GlyphInk(drawing);
+                textMetrics.Add(new { name = block.Name, text = block.Text, block.ActualWidth, block.ActualHeight, block.DesiredSize,
+                    wrapping = block.TextWrapping.ToString(), formattingMode = TextOptions.GetTextFormattingMode(block).ToString(),
+                    ink = InkDetails(ink.Bounds), ink.Runs, reflowWidth = width, formatted.Width, formatted.Height });
+                string dimensions = $"actual={block.ActualWidth:F2}x{block.ActualHeight:F2}, ink={ink.Bounds}, reflowWidth={width:F2}, reflowHeight={formatted.Height:F2} DIP";
+                Require(block.FontFamily.Source.StartsWith("Segoe UI", StringComparison.Ordinal), "Text is missing shared typography: " + block.Name);
+                Require(!block.Text.Contains('\uFFFD'), $"Replacement character in {block.Name}: {block.Text}");
+                if (block.TextTrimming == TextTrimming.None)
                 {
-                    Require(!glyph.GlyphRun.GlyphIndices.Contains((ushort)0), $"Missing rendered glyph in {block.Name}: {block.Text}");
-                    foreach (string family in glyph.GlyphRun.GlyphTypeface.FamilyNames.Values) renderedFonts.Add(family);
+                    if (block.TextWrapping == TextWrapping.NoWrap)
+                    {
+                        Require(formatted.Width <= width + 2, $"Horizontal text overflow: {name}/{block.Name}: {dimensions}");
+                        Require(formatted.Height <= block.ActualHeight + 2, $"Vertical text clipping: {name}/{block.Name}: {dimensions}");
+                    }
+                    // TextBlock preserves measured line breaks across rounding/shaping; reflowing at ActualWidth does not.
+                    else Require(ink.Runs > 0 && InkFits(block, ink.Bounds), $"Wrapped glyph clipping: {name}/{block.Name}: {dimensions}");
                 }
+                if (drawing is not null)
+                    foreach (GlyphRunDrawing glyph in Glyphs(drawing))
+                    {
+                        Require(!glyph.GlyphRun.GlyphIndices.Contains((ushort)0), $"Missing rendered glyph in {block.Name}: {block.Text}");
+                        foreach (string family in glyph.GlyphRun.GlyphTypeface.FamilyNames.Values) renderedFonts.Add(family);
+                    }
+            }
+        }
+        finally
+        {
+            Cleanup("save text metrics for " + name, () => File.WriteAllText(Path.Combine(output, name + "-text-metrics.json"),
+                JsonSerializer.Serialize(textMetrics, new JsonSerializerOptions { WriteIndented = true })));
         }
         var inputs = new List<object>();
         foreach (Control input in Descendants(content).OfType<Control>().Where(c => (c is TextBox or PasswordBox) && VisibleWithin(c, content) && c.ActualWidth > 1 && c.ActualHeight > 1))
@@ -460,6 +481,70 @@ internal static class Program
         }
         Require(renderedFonts.Count > 0, "No rendered glyph evidence: " + name);
         return new { name, textBlocks = text.Length, inputs, windowFont = window.FontFamily.Source, renderedFonts, actualDpi = VisualTreeHelper.GetDpi(window).PixelsPerInchX, simulatedScalePercent = percent, layoutWidth = renderRoot.ActualWidth, layoutHeight = renderRoot.ActualHeight, pixelWidth = bitmap.PixelWidth, pixelHeight = bitmap.PixelHeight };
+    }
+
+    private static object CheckWrappedInkControls(TextBlock source, string output, string id)
+    {
+        var controls = new List<object>();
+        try
+        {
+            foreach (bool clipped in new[] { false, true })
+            {
+                var block = new TextBlock { Text = source.Text, FontFamily = source.FontFamily, FontSize = source.FontSize,
+                    FontWeight = source.FontWeight, FontStyle = source.FontStyle, FontStretch = source.FontStretch,
+                    Foreground = Brushes.Black, Language = source.Language, FlowDirection = source.FlowDirection,
+                    TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center, UseLayoutRounding = true, Height = clipped ? 8 : double.NaN, ClipToBounds = clipped };
+                TextOptions.SetTextFormattingMode(block, TextOptions.GetTextFormattingMode(source));
+                var frame = new Border { Width = 600, Height = 80, Background = Brushes.White, Child = block };
+                frame.Measure(new Size(600, 80));
+                frame.Arrange(new Rect(0, 0, 600, 80));
+                frame.UpdateLayout();
+                var bitmap = new RenderTargetBitmap(600, 80, 96, 96, PixelFormats.Pbgra32);
+                bitmap.Render(frame);
+                using (var file = File.Create(Path.Combine(output, $"{id}-ink-control-{(clipped ? "clipped" : "normal")}.png")))
+                { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(file); }
+                var ink = GlyphInk(VisualTreeHelper.GetDrawing(block));
+                bool fits = InkFits(block, ink.Bounds);
+                bool verticalOverflow = !ink.Bounds.IsEmpty && (ink.Bounds.Top < -2 || ink.Bounds.Bottom > block.ActualHeight + 2);
+                controls.Add(new { clipped, expectedFits = !clipped, actualFits = fits, verticalOverflow, block.ActualWidth, block.ActualHeight, ink = InkDetails(ink.Bounds), ink.Runs });
+                Require(ink.Runs > 0 && !ink.Bounds.IsEmpty, "Ink control did not render real glyphs.");
+                Require(fits != clipped, clipped ? "Ink audit did not reject the clipped negative control." : "Ink audit rejected the centered normal control.");
+                Require(!clipped || verticalOverflow, "Negative control did not produce vertical glyph clipping.");
+            }
+            return new { name = "wrapped-ink-controls", controls };
+        }
+        finally
+        {
+            Cleanup("save ink control metrics", () => File.WriteAllText(Path.Combine(output, id + "-ink-controls.json"),
+                JsonSerializer.Serialize(controls, new JsonSerializerOptions { WriteIndented = true })));
+        }
+    }
+
+    private static bool InkFits(TextBlock block, Rect ink) => !ink.IsEmpty && ink.Left >= -2 && ink.Top >= -2
+        && ink.Right <= block.ActualWidth + 2 && ink.Bottom <= block.ActualHeight + 2;
+    private static object? InkDetails(Rect ink) => ink.IsEmpty ? null : new { ink.X, ink.Y, ink.Width, ink.Height };
+    private static (Rect Bounds, int Runs) GlyphInk(Drawing? drawing)
+    {
+        Rect bounds = Rect.Empty;
+        int runs = 0;
+        void Visit(Drawing item, Matrix toRoot)
+        {
+            if (item is GlyphRunDrawing glyph)
+            {
+                if (!glyph.Bounds.IsEmpty) bounds.Union(new MatrixTransform(toRoot).TransformBounds(glyph.Bounds));
+                runs++;
+            }
+            else if (item is DrawingGroup group)
+            {
+                var transform = group.Transform?.Value ?? Matrix.Identity;
+                transform.Append(toRoot);
+                // Ignore ClipGeometry when measuring ink so clipped glyphs remain detectable.
+                foreach (Drawing child in group.Children) Visit(child, transform);
+            }
+        }
+        if (drawing is not null) Visit(drawing, Matrix.Identity);
+        return (bounds, runs);
     }
 
     private static void AssertVisibility(Window window, int page)
