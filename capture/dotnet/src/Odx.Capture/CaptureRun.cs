@@ -108,7 +108,8 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, QualityAlert> _gameAlerts = new(StringComparer.Ordinal);
     private CancellationTokenSource? _arma3GuardStop;
     private Task? _arma3GuardTask;
-    private string? _guardStopReason;
+    private Arma3GuardStop? _guardStop;
+    private long _lastGameFpsBits = long.MinValue;
 
     public string SessionDir { get; }
     /// <summary>Completes when odx record reports that capture is running; it can take seconds on a cold start.</summary>
@@ -125,9 +126,17 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
     public event Action<string?>? ProblemChanged;
     public IReadOnlyList<QualityAlert> GameAlerts => _gameAlerts.Values
         .OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
-    public string? GuardStopReason => Volatile.Read(ref _guardStopReason);
+    public double? GameFps
+    {
+        get
+        {
+            long bits = Interlocked.Read(ref _lastGameFpsBits);
+            return bits == long.MinValue ? null : BitConverter.Int64BitsToDouble(bits);
+        }
+    }
+    public Arma3GuardStop? GuardStop => Volatile.Read(ref _guardStop);
     public event Action<IReadOnlyList<QualityAlert>>? GameAlertsChanged;
-    public event Action<string>? GuardStopRequested;
+    public event Action<Arma3GuardStop>? GuardStopRequested;
 
     private CaptureRun(CaptureOptions options)
     {
@@ -244,11 +253,12 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
         _arma3GuardStop = guardStop;
         monitor.SampleReceived += sample =>
         {
+            Interlocked.Exchange(ref _lastGameFpsBits, BitConverter.DoubleToInt64Bits(sample.GameFps));
             var update = evaluator.Observe(sample, DateTime.UtcNow);
             if (update.Changed) PublishGameAlerts(update.Alerts);
-            if (update.StopReason is { } reason &&
-                Interlocked.CompareExchange(ref _guardStopReason, reason, null) is null)
-                GuardStopRequested?.Invoke(reason);
+            if (update.Stop is { } requested &&
+                Interlocked.CompareExchange(ref _guardStop, requested, null) is null)
+                GuardStopRequested?.Invoke(requested);
         };
         monitor.TelemetryUnavailable += () =>
         {
@@ -440,7 +450,7 @@ public sealed class CaptureRun : ICaptureRun, IGameGuardCaptureRun
         long framesCut = finalize is { Ok: true } f ? Math.Max(0, (status?.Frames ?? 0) - f.Frames) : 0;
         var report = new CaptureReport(finalize?.Frames ?? status?.Frames ?? 0, roundFrames, _fps, status?.Duplicates ?? 0,
             status?.Starved ?? 0, status?.LeadingBlack ?? 0, File.Exists(Path.Combine(SessionDir, VideoFinalize.Output)),
-            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure ?? GuardStopReason, status?.Audio?.Error,
+            status?.Audio?.Source, _gridOrigin, build?.Report?.GridOriginOffsetMs, failure ?? (GuardStop?.Code == "ARMA3_COMMAND_MENU" ? GuardStop.Reason : null), status?.Audio?.Error,
             status?.Stop?.Note, Math.Max(0, (status?.Stop?.TailFrames ?? 0) - framesCut));
         var result = new RunResult(SessionDir, captureOk, status, inputEvents, errors, build, failure, finalize, report);
         SetPhase(CapturePhase.Done, 100);
