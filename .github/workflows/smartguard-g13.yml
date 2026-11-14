@@ -2,7 +2,7 @@ name: ODX Smart Guard G1.3 - Windows x64 QA (Protocol 5)
 
 on:
   push:
-    branches: [feature/smart-ai-guard-g13-gamefps-party-esc-countdown]
+    branches: [feature/smart-ai-guard-g13-gamefps-party-esc-countdown, feature/dashboard-reference-match]
   workflow_dispatch:
 
 concurrency:
@@ -130,7 +130,43 @@ jobs:
             if (-not (Test-Path (Join-Path $dest $rel))) { throw "QA package missing $rel" }
           }
 
-          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          # Preserve empty data directories as real directory entries for Windows Explorer.
+          foreach ($rel in @('data','data/captures','data/delivery','data/logs')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $dest $rel) | Out-Null
+          }
+
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = "$dest.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          $rootPath = [IO.Path]::GetFullPath($dest)
+          $zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
+          try {
+            foreach ($folder in (Get-ChildItem -LiteralPath $dest -Directory -Recurse -Force | Sort-Object FullName)) {
+              $relative = [IO.Path]::GetRelativePath($rootPath, $folder.FullName).Replace('\','/') + '/'
+              $entry = $zip.CreateEntry($relative)
+              $entry.ExternalAttributes = [int][IO.FileAttributes]::Directory
+            }
+            foreach ($file in (Get-ChildItem -LiteralPath $dest -File -Recurse -Force)) {
+              $relative = [IO.Path]::GetRelativePath($rootPath, $file.FullName).Replace('\','/')
+              [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $file.FullName, $relative, [IO.Compression.CompressionLevel]::Optimal
+              ) | Out-Null
+            }
+          }
+          finally { $zip.Dispose() }
+
+          # Fail the build if Explorer-compatible directory entries are missing.
+          $checkZip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            foreach ($rel in @('data/','data/captures/','data/delivery/','data/logs/')) {
+              $entry = $checkZip.GetEntry($rel)
+              if ($null -eq $entry -or (($entry.ExternalAttributes -band [int][IO.FileAttributes]::Directory) -eq 0)) {
+                throw "Package ZIP is missing a Windows directory entry: $rel"
+              }
+            }
+          }
+          finally { $checkZip.Dispose() }
           $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
           $launcherHash = (Get-FileHash (Join-Path $dest 'tools/OdxArma3.exe') -Algorithm SHA256).Hash
           $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
