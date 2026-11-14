@@ -131,7 +131,7 @@ public sealed class Arma3GuardEvaluator
             Clear("ARMA3_TEAMMATES_NOT_VERIFIED", nowUtc);
             // A four-player Party has at most three teammates. Seeing any one of them is sufficient;
             // do not require all teammates to fit in the camera frame.
-            if (sample.VisibleTeammates < 1 || sample.VisibleTeammates > 3)
+            if (sample.VisibleTeammates < 1)
             {
                 _teammateRecoverySamples = 0;
                 _noTeammateVisibleSinceUtc ??= nowUtc;
