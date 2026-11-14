@@ -15,7 +15,8 @@ public static class PartyAlertCodec
     {
         if (!Odx.Protocol.ToggleRound.IsValidSessionId(sessionId))
             throw new ArgumentException("Invalid session id.", nameof(sessionId));
-        var warnings = alerts.Where(a => a.Severity is QualityAlertSeverity.Warning or QualityAlertSeverity.Critical).ToArray();
+        var warnings = alerts.Where(a => a.Severity is QualityAlertSeverity.Warning or QualityAlertSeverity.Critical ||
+                                         a.Code == "ODX_VIDEO_FRAMES").ToArray();
         string payload = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(warnings));
         return Prefix + sessionId + "|" + payload;
     }
