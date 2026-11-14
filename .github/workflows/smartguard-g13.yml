@@ -5,6 +5,10 @@ on:
     branches: [feature/smart-ai-guard-g13-gamefps-party-esc-countdown]
   workflow_dispatch:
 
+concurrency:
+  group: smartguard-g13-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -111,6 +115,7 @@ jobs:
             'Party stop: ESC or camera-view change from any member of a four-player Party is relayed through existing Protocol 5 and the Host ToggleRound stop. All four takes must be recorded again.',
             'Party alerts: current warning/critical alert set is refreshed through Protocol 5 every three seconds (within the five-second synchronization target).',
             'AI GUARD: independent overlay countdown remains visible for the full 235-second round when Windows confirms capture exclusion. OBS remains fail-closed because overlay exclusion is not guaranteed for every OBS capture path.',
+            'Arma 3 Live preflight: the game window client area must be exactly 1280x720; other sizes or an unreadable/closed game window block Ready and Host Start Round.',
             'Arma 3 runtime: tools/OdxArma3.exe embeds the updated addon and odx_capture_x64.dll. Run it before launching Arma 3 so it installs the updated @OdxCapture files into the existing game folder.',
             'SERVER COMPATIBILITY: existing Orchestrator Protocol 5. Do not update, replace, or add a server. Keep the current server URL, access_key, database and ZeroTier configuration.',
             'The included bin/odx-capture.json is a template without the private access_key. Copy your EXISTING bin/odx-capture.json from the working installation into this package bin folder. Never share that JSON.',
