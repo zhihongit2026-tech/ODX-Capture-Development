@@ -1339,6 +1339,7 @@ public partial class MainWindow : Window
         if (!room.Agent.IsReady && !TryValidateArma3Resolution(out string resolutionProblem))
         {
             SetStatus(_ => resolutionProblem);
+            MessageBox.Show(this, resolutionProblem, "ODX SMART GUARD", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (!room.Agent.IsReady && GetRunningInputMethod() is { } ime)
@@ -1357,6 +1358,7 @@ public partial class MainWindow : Window
             !TryValidateArma3Resolution(out string resolutionProblem))
         {
             SetStatus(_ => resolutionProblem);
+            MessageBox.Show(this, resolutionProblem, "ODX SMART GUARD", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (room.Agent.Room is { CurrentSession: null } && GetRunningInputMethod() is { } ime)
