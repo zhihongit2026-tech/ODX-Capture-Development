@@ -145,6 +145,22 @@ public partial class MainWindow : Window
         if (configError is not null) SetStatus(t => t.ConfigInvalid(configError));
     }
 
+    // Dashboard navigation only changes the visible scroll position; all existing controls and handlers remain active.
+    private void NavigateDashboard_Click(object sender, RoutedEventArgs e) =>
+        DashboardScroll.ScrollToVerticalOffset(0);
+
+    private void NavigateCapture_Click(object sender, RoutedEventArgs e) =>
+        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, CaptureCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
+            + DashboardScroll.VerticalOffset));
+
+    private void NavigateParty_Click(object sender, RoutedEventArgs e) =>
+        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, PartyCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
+            + DashboardScroll.VerticalOffset));
+
+    private void NavigateSettings_Click(object sender, RoutedEventArgs e) =>
+        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, SettingsCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
+            + DashboardScroll.VerticalOffset));
+
     private void ApplyLanguage()
     {
         LanguageLabel.Content = _t.Language;
