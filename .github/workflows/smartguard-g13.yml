@@ -130,7 +130,46 @@ jobs:
             if (-not (Test-Path (Join-Path $dest $rel))) { throw "QA package missing $rel" }
           }
 
-          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          # Keep the empty data folders as real Windows directories in the ZIP.
+          # Compress-Archive can emit zero-length folder entries without the DOS Directory attribute,
+          # which makes File Explorer omit them when extracting the package.
+          $dataDirs = @('data','data/captures','data/delivery','data/logs')
+          foreach ($rel in $dataDirs) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $dest $rel) | Out-Null
+          }
+
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = "$dest.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          $zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
+          try {
+            $rootPath = (Resolve-Path $dest).Path.TrimEnd('\\')
+            foreach ($folder in (Get-ChildItem -LiteralPath $dest -Directory -Recurse -Force | Sort-Object FullName)) {
+              $entryName = $folder.FullName.Substring($rootPath.Length).TrimStart('\\').Replace('\\','/') + '/'
+              $entry = $zip.CreateEntry($entryName)
+              $entry.ExternalAttributes = [int][IO.FileAttributes]::Directory
+            }
+            foreach ($file in (Get-ChildItem -LiteralPath $dest -File -Recurse -Force)) {
+              $entryName = $file.FullName.Substring($rootPath.Length).TrimStart('\\').Replace('\\','/')
+              [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $file.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal
+              ) | Out-Null
+            }
+          }
+          finally { $zip.Dispose() }
+
+          # Verify the folder entries carry the Windows directory bit before publishing the artifact.
+          $checkZip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            foreach ($rel in @('data/','data/captures/','data/delivery/','data/logs/')) {
+              $entry = $checkZip.GetEntry($rel)
+              if ($null -eq $entry -or (($entry.ExternalAttributes -band [int][IO.FileAttributes]::Directory) -eq 0)) {
+                throw "Package ZIP is missing a Windows directory entry: $rel"
+              }
+            }
+          }
+          finally { $checkZip.Dispose() }
           $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
           $launcherHash = (Get-FileHash (Join-Path $dest 'tools/OdxArma3.exe') -Algorithm SHA256).Hash
           $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
