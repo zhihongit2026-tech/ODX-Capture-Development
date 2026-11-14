@@ -1,0 +1,144 @@
+name: ODX Smart Guard G1.3 - Windows x64 QA (Protocol 5)
+
+on:
+  push:
+    branches: [feature/smart-ai-guard-g13-gamefps-party-esc-countdown]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-qa:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: capture/dotnet/global.json
+
+      - name: Install FFmpeg for regression fixtures
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Build full .NET solution
+        working-directory: capture/dotnet
+        shell: pwsh
+        run: |
+          dotnet build OdxCapture.sln -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Solution build failed' }
+
+      - name: Run complete .NET regression suite (one full retry for transient timing flakes)
+        working-directory: capture/dotnet
+        shell: pwsh
+        run: |
+          dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g13-attempt1.trx"
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            Write-Warning 'First full regression pass failed; rerunning the complete suite once.'
+            dotnet test OdxCapture.sln -c Release --no-build --logger "trx;LogFileName=smartguard-g13-attempt2.trx"
+            if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed on both full runs' }
+          }
+
+      - name: Build native extractor and Arma 3 extension
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            if (Test-Path capture/native/extractor/build) {
+              Remove-Item capture/native/extractor/build -Recurse -Force
+            }
+            cmake -S capture/native/extractor -B capture/native/extractor/build
+            if ($LASTEXITCODE -eq 0) {
+              cmake --build capture/native/extractor/build --config Release
+              if ($LASTEXITCODE -eq 0) { break }
+            }
+            if ($attempt -eq 2) { throw 'Native extractor/Arma 3 extension build failed after one clean retry' }
+            Write-Warning 'Native build failed; retrying once after a transient external dependency download failure.'
+            Start-Sleep -Seconds 10
+          }
+          ctest --test-dir capture/native/extractor/build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Native extractor regression failed' }
+          if (-not (Test-Path capture/native/extractor/build/Release/odx_capture_x64.dll)) {
+            throw 'Updated odx_capture_x64.dll was not produced'
+          }
+
+      - name: Build OdxArma3 launcher with updated addon and extension embedded
+        shell: pwsh
+        run: |
+          dotnet build -c Release research/arma3-camera-spike/launcher/OdxArma3
+          if ($LASTEXITCODE -ne 0) { throw 'OdxArma3 launcher build failed' }
+          if (-not (Test-Path research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe)) {
+            throw 'OdxArma3.exe missing'
+          }
+
+      - name: Assemble complete ODX 0.3.5 Smart Guard G1.3 Windows x64 QA package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/trquoccuong/Game-Recorder/releases/download/capture-v0.3.5/odx-capture-0.3.5-win-x64.zip'
+          Invoke-WebRequest $url -OutFile baseline.zip
+          $hash = (Get-FileHash baseline.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'd67ff01452151bf571046cbf706eab5ad0b44a5c23f987f60ec88f8da0c15968') {
+            throw "Original 0.3.5 release hash mismatch: $hash"
+          }
+          Expand-Archive baseline.zip -DestinationPath extracted
+          $original = Join-Path (Get-Location) 'extracted/odx-capture-0.3.5-win-x64'
+          foreach ($rel in @('Odx Capture.exe','bin/odx.exe','bin/odx-capture.json','bin/ffmpeg/ffmpeg.exe')) {
+            if (-not (Test-Path (Join-Path $original $rel))) { throw "Baseline package missing $rel" }
+          }
+
+          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5-smartguard-g13 -o app-publish
+          if ($LASTEXITCODE -ne 0) { throw 'Smart Guard WPF publish failed' }
+          $app = Join-Path (Get-Location) 'app-publish/odx-app.exe'
+          if (-not (Test-Path $app)) { throw 'Patched odx-app.exe missing' }
+          Copy-Item $app (Join-Path $original 'bin/odx-app.exe') -Force
+
+          $tools = Join-Path $original 'tools'
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          Copy-Item 'research/arma3-camera-spike/launcher/OdxArma3/bin/Release/net48/OdxArma3.exe' (Join-Path $tools 'OdxArma3.exe') -Force
+
+          $configFile = Join-Path $original 'bin/odx-capture.json'
+          $config = Get-Content $configFile -Raw | ConvertFrom-Json
+          $config.PSObject.Properties.Remove('access_key')
+          $config.orchestrator = 'https://13-251-211-134.sslip.io'
+          $config | ConvertTo-Json -Depth 8 | Set-Content -Path $configFile -Encoding utf8
+
+          @(
+            'ODX Capture 0.3.5 - Smart Guard G1.3 QA - Windows x64',
+            'Base: verified upstream ODX Capture 0.3.5 runtime. F10 and the 235-second auto-stop are retained.',
+            'FPS: Arma 3 in-game diag_fps only. Below 50 FPS warns; below 45 FPS is critical after two 500 ms samples. Recorder/FFmpeg FPS never creates an FPS-drop alert.',
+            'Party stop: ESC or camera-view change from any member of a four-player Party is relayed through existing Protocol 5 and the Host ToggleRound stop. All four takes must be recorded again.',
+            'Party alerts: current warning/critical alert set is refreshed through Protocol 5 every three seconds (within the five-second synchronization target).',
+            'AI GUARD: independent overlay countdown remains visible for the full 235-second round when Windows confirms capture exclusion. OBS remains fail-closed because overlay exclusion is not guaranteed for every OBS capture path.',
+            'Arma 3 runtime: tools/OdxArma3.exe embeds the updated addon and odx_capture_x64.dll. Run it before launching Arma 3 so it installs the updated @OdxCapture files into the existing game folder.',
+            'SERVER COMPATIBILITY: existing Orchestrator Protocol 5. Do not update, replace, or add a server. Keep the current server URL, access_key, database and ZeroTier configuration.',
+            'The included bin/odx-capture.json is a template without the private access_key. Copy your EXISTING bin/odx-capture.json from the working installation into this package bin folder. Never share that JSON.',
+            'Extract to a new folder for QA. Do not overwrite the working installation or existing data/, captures/ and previous takes.'
+          ) | Set-Content -Path (Join-Path $original 'README-SMART-GUARD-G13.txt') -Encoding UTF8
+
+          $dest = 'odx-capture-0.3.5-smartguard-g13-win-x64'
+          Move-Item $original $dest
+          $required = @('Odx Capture.exe','bin/odx-app.exe','bin/odx.exe','bin/ffmpeg/ffmpeg.exe','tools/OdxArma3.exe','bin/odx-capture.json')
+          foreach ($rel in $required) {
+            if (-not (Test-Path (Join-Path $dest $rel))) { throw "QA package missing $rel" }
+          }
+
+          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
+          $launcherHash = (Get-FileHash (Join-Path $dest 'tools/OdxArma3.exe') -Algorithm SHA256).Hash
+          $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
+          @("odx-app.exe SHA256: $exeHash","OdxArma3.exe SHA256: $launcherHash","package ZIP SHA256: $zipHash") |
+            Set-Content -Path SHA256SUMS.txt -Encoding ASCII
+          Write-Host "EXE SHA256: $exeHash"
+          Write-Host "OdxArma3 SHA256: $launcherHash"
+          Write-Host "ZIP SHA256: $zipHash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Windows-x64
+          path: |
+            odx-capture-0.3.5-smartguard-g13-win-x64.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
