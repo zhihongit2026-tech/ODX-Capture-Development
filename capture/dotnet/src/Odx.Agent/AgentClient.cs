@@ -925,8 +925,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             await EndWithoutCaptureAsync(s.SessionId, $"round cancelled, recording kept locally only ({aside})", stop, cancelled: true);
             return;
         }
-        bool ok = result.CaptureOk && retakeReason is null;
-        string? failure = retakeReason ?? (ok ? null : result.Failure ?? "capture failed");
+        bool reportFailed = result.Report?.Verdict == CaptureReport.Failed;
+        bool ok = result.CaptureOk && !reportFailed && retakeReason is null;
+        string? failure = retakeReason ?? (ok ? null :
+            result.Failure ?? result.Report?.Problems().FirstOrDefault() ?? "capture failed");
         await SendDoneAsync(new Done(s.SessionId, ok, failure, result.Report), stop);
         await SendAsync(new AgentState("idle"), stop);
         Log?.Invoke($"{s.SessionId} done: {(ok ? $"kept in {result.SessionDir}" : failure)}" +
