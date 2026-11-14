@@ -26,6 +26,7 @@ another case fails. Any failed case or cleanup still makes the overall run fail.
   orchestrator, matching the existing product behavior.
 - Create and close three real local rooms, revisiting Party and Overview while
   connected. Verify the roster name/readiness against the real backend response.
+  Save the connected Overview roster after scrolling into view, as well as Party.
   A test identity is used only by the harness; no recording starts.
 - Exercise minimize-to-tray, second-instance restore, maximize, restore and
   resize on the packaged application.
@@ -34,13 +35,21 @@ another case fails. Any failed case or cleanup still makes the overall run fail.
 - In separate WPF processes, instantiate the actual compiled application and
   check the four page grids' visibility, Vietnamese glyph rendering and text
   bounds. Render all available pages at 100%, 125%, 150% and 175%, with the
-  corresponding logical viewport for a 1920×1080 display.
+  corresponding logical viewport for a 1920×1080 display. Test-only window
+  minimums prevent the hosted desktop from clamping these sizes; assert actual
+  content and raster dimensions within one output pixel. Render Overview at both
+  the top and bottom so the Frames chart and roster appear in the evidence.
 - Show the conditional OBS connection rows in layout workers by enabling OBS
-  only in the harness-owned test settings. Restore the exact settings bytes after
-  each worker, including failures/timeouts. No OBS connection or recording starts.
+  only in the harness-owned test settings, with a dummy password for mask-glyph
+  rendering. Audit TextBox/PasswordBox scroll viewports against rendered line and
+  content heights, and inspect their actual glyph drawings. Restore the exact
+  settings bytes after each worker, including failures/timeouts. No OBS connection
+  or recording starts.
 - Audit the same shared family and actual rendered glyphs in JoinRoomDialog,
   ToastOverlay, SmartGuardOverlay and CountdownOverlay content. The overlay
   content is rendered separately without starting capture or overlay timers.
+  A test wrapper preserves the window background, typography, resources and
+  content margins so auxiliary screenshots include the whole content bounds.
   Test strings/alerts are confined to the harness. Check the real tray menu's
   Segoe UI 14-DIP equivalent font as well.
 

@@ -51,9 +51,8 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="7">
-                            <ScrollViewer x:Name="PART_ContentHost"
-                                          Margin="{TemplateBinding Padding}"
-                                          VerticalAlignment="Center" />
+                            <!-- TextBox forwards its Padding to this host; applying it again clips glyphs. -->
+                            <ScrollViewer x:Name="PART_ContentHost" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True">
@@ -86,9 +85,8 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="7">
-                            <ScrollViewer x:Name="PART_ContentHost"
-                                          Margin="{TemplateBinding Padding}"
-                                          VerticalAlignment="Center" />
+                            <!-- PasswordBox forwards its Padding to this host, as TextBox does. -->
+                            <ScrollViewer x:Name="PART_ContentHost" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True">

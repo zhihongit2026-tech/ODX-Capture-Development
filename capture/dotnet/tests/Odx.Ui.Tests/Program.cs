@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -72,6 +73,7 @@ internal static class Program
                                 var layoutSettings = JsonSerializer.Deserialize<Odx.App.AppSettings>(savedSettings)
                                     ?? throw new InvalidOperationException("Missing layout test settings.");
                                 layoutSettings.RecordWithObs = true;
+                                layoutSettings.ObsPassword = "uiqa-test";
                                 File.WriteAllText(settings, JsonSerializer.Serialize(layoutSettings));
                                 string worker = Path.Combine(temporary, $"layout-{configured}-{percent}");
                                 CopyDirectory(AppContext.BaseDirectory, worker);
@@ -179,6 +181,17 @@ internal static class Program
                             stage = $"verify local room {room + 1} roster, visit {visit + 1}";
                             Navigate(window, 0);
                             Wait(() => NamedTextShown(window, memberName) && NamedTextShown(window, readyText), "Party roster does not match the real room member and readiness.");
+                            if (visit == 0)
+                            {
+                                var scroll = (ScrollPattern)(Find(window, "DashboardScroll") ?? throw new InvalidOperationException("Missing dashboard scroll viewer.")).GetCurrentPattern(ScrollPattern.Pattern);
+                                if (scroll.Current.VerticallyScrollable)
+                                {
+                                    scroll.SetScrollPercent(ScrollPattern.NoScroll, 100);
+                                    Wait(() => scroll.Current.VerticalScrollPercent >= 99, "Overview did not scroll to its roster.");
+                                }
+                                Wait(() => NamedTextShown(window, memberName) && NamedTextShown(window, readyText), "Connected roster disappeared before its screenshot.");
+                                Screenshot(handle, Path.Combine(_output, $"{id}-overview-room-{room}.png"));
+                            }
                             Navigate(window, 2);
                             Require(Shown(window, "RoomBox"), "Connected room disappeared while changing pages.");
                         }
@@ -304,6 +317,7 @@ internal static class Program
         string output = Option(args, "--output");
         int percent = int.Parse(Option(args, "--percent"), CultureInfo.InvariantCulture);
         bool configured = bool.Parse(Option(args, "--configured"));
+        double scale = percent / 100.0, targetWidth = 1920 / scale, targetHeight = 1080 / scale;
         string id = $"layout-{configured}-{percent}";
         var evidence = new List<object>();
         string? failure = null;
@@ -314,9 +328,14 @@ internal static class Program
         {
             application = new Odx.App.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             application.InitializeComponent();
-            window = new Odx.App.MainWindow { WindowState = WindowState.Normal, Width = 1920.0 / (percent / 100.0), Height = 1080.0 / (percent / 100.0) };
+            // Test-only minimums override the hosted desktop's native maximum tracking size.
+            window = new Odx.App.MainWindow { WindowState = WindowState.Normal, MinWidth = targetWidth, MinHeight = targetHeight, Width = targetWidth, Height = targetHeight };
             window.Show();
             Pump();
+            var root = window.Content as FrameworkElement
+                ?? throw new InvalidOperationException("Dashboard has no layout content.");
+            Require(Math.Abs(root.ActualWidth - targetWidth) * scale <= 1 && Math.Abs(root.ActualHeight - targetHeight) * scale <= 1,
+                $"Requested 1920x1080 equivalent layout was constrained to {root.ActualWidth:F2}x{root.ActualHeight:F2} DIP at {percent}%.");
             AssertVisibility(window, 0);
             var tray = (System.Windows.Forms.NotifyIcon)typeof(Odx.App.MainWindow).GetField("_tray", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
             Require(tray.ContextMenuStrip?.Font.FontFamily.Name == "Segoe UI" && Math.Abs(tray.ContextMenuStrip.Font.SizeInPoints - 10.5) < 0.1, "Tray menu does not use the shared 14-DIP Segoe UI typography.");
@@ -331,7 +350,16 @@ internal static class Program
                     obsControlsVisible = ((FrameworkElement)window.FindName("ObsConnectionPanel")).IsVisible;
                     Require(obsControlsVisible, "OBS connection controls were not shown for the typography audit.");
                 }
-                evidence.Add(AuditAndRender(window, (FrameworkElement)window.Content, output, id + "-" + Pages[page], percent, 8));
+                evidence.Add(AuditAndRender(window, root, output, id + "-" + Pages[page], percent, 8));
+                if (page == 0)
+                {
+                    var scroll = (ScrollViewer)window.FindName("DashboardScroll");
+                    scroll.ScrollToBottom();
+                    Pump();
+                    AssertVisibility(window, 0);
+                    Require(Math.Abs(scroll.VerticalOffset - scroll.ScrollableHeight) <= 1, "Overview did not reach its bottom content.");
+                    evidence.Add(AuditAndRender(window, root, output, id + "-OverviewPage-bottom", percent, 8));
+                }
             }
             var toast = (Odx.App.ToastOverlay)Activator.CreateInstance(typeof(Odx.App.ToastOverlay), nonPublic: true)!;
             ((TextBlock)toast.FindName("TitleText")).Text = "Đã lưu lượt ghi hình";
@@ -341,14 +369,23 @@ internal static class Program
             guard.UpdateAlerts([new Odx.Core.QualityAlert("TEST_ONLY", Odx.Core.QualityAlertSeverity.Warning, "Cảnh báo kiểm tra chữ tiếng Việt", "Dữ liệu minh họa chỉ nằm trong bộ kiểm thử giao diện.")]);
             foreach (Window auxiliary in new Window[] { new Odx.App.JoinRoomDialog(Odx.App.Strings.Vi), toast, guard, new Odx.App.CountdownOverlay { Text = "ĐANG LƯU" } })
             {
+                auxiliary.ApplyTemplate();
                 var content = auxiliary.Content as FrameworkElement
                     ?? throw new InvalidOperationException("Auxiliary window has no layout content.");
                 // Rendering a detached content tree exercises typography without starting overlay capture-exclusion or timers.
                 auxiliary.Content = null;
-                content.Measure(new Size(1920.0 / (percent / 100.0), double.PositiveInfinity));
-                content.Arrange(new Rect(content.DesiredSize));
-                content.UpdateLayout();
-                evidence.Add(AuditAndRender(auxiliary, content, output, id + "-" + auxiliary.GetType().Name, percent, 1));
+                var frame = new Border { Background = auxiliary.Background, Resources = auxiliary.Resources, Child = content };
+                TextElement.SetFontFamily(frame, auxiliary.FontFamily);
+                TextElement.SetFontSize(frame, auxiliary.FontSize);
+                TextElement.SetFontWeight(frame, auxiliary.FontWeight);
+                TextElement.SetFontStyle(frame, auxiliary.FontStyle);
+                TextElement.SetFontStretch(frame, auxiliary.FontStretch);
+                TextElement.SetForeground(frame, auxiliary.Foreground);
+                frame.Measure(new Size(targetWidth, double.PositiveInfinity));
+                frame.Arrange(new Rect(frame.DesiredSize));
+                frame.UpdateLayout();
+                Pump();
+                evidence.Add(AuditAndRender(auxiliary, content, output, id + "-" + auxiliary.GetType().Name, percent, 1, frame));
                 auxiliary.Close();
             }
         }
@@ -363,11 +400,14 @@ internal static class Program
         return failure is null ? 0 : 1;
     }
 
-    private static object AuditAndRender(Window window, FrameworkElement content, string output, string name, int percent, int minimumText)
+    private static object AuditAndRender(Window window, FrameworkElement content, string output, string name, int percent, int minimumText, FrameworkElement? renderRoot = null)
     {
         Require(window.FontFamily.Source.StartsWith("Segoe UI", StringComparison.Ordinal), "Window is missing shared typography: " + name);
-        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(content.ActualWidth * percent / 100), (int)Math.Ceiling(content.ActualHeight * percent / 100), 96.0 * percent / 100, 96.0 * percent / 100, PixelFormats.Pbgra32);
-        bitmap.Render(content);
+        renderRoot ??= content;
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(renderRoot.ActualWidth * percent / 100), (int)Math.Ceiling(renderRoot.ActualHeight * percent / 100), 96.0 * percent / 100, 96.0 * percent / 100, PixelFormats.Pbgra32);
+        if (window is Odx.App.MainWindow)
+            Require(Math.Abs(bitmap.PixelWidth - 1920) <= 1 && Math.Abs(bitmap.PixelHeight - 1080) <= 1, "Dashboard raster does not match the requested Full HD viewport: " + name);
+        bitmap.Render(renderRoot);
         using (var file = File.Create(Path.Combine(output, name + ".png")))
         { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(file); }
         var text = Descendants(content).OfType<TextBlock>().Where(t => VisibleWithin(t, content) && t.ActualWidth > 1 && t.ActualHeight > 1 && !string.IsNullOrWhiteSpace(t.Text) && !t.FontFamily.Source.Contains("MDL2", StringComparison.Ordinal)).ToArray();
@@ -393,8 +433,33 @@ internal static class Program
                     foreach (string family in glyph.GlyphRun.GlyphTypeface.FamilyNames.Values) renderedFonts.Add(family);
                 }
         }
+        var inputs = new List<object>();
+        foreach (Control input in Descendants(content).OfType<Control>().Where(c => (c is TextBox or PasswordBox) && VisibleWithin(c, content) && c.ActualWidth > 1 && c.ActualHeight > 1))
+        {
+            Require(input.FontFamily.Source.StartsWith("Segoe UI", StringComparison.Ordinal), "Input is missing shared typography: " + input.Name);
+            var host = input.Template?.FindName("PART_ContentHost", input) as ScrollViewer
+                ?? throw new InvalidOperationException("Input has no scroll viewport: " + input.Name);
+            string displayed = input is TextBox box ? box.Text : new string(((PasswordBox)input).PasswordChar, ((PasswordBox)input).Password.Length);
+            var formatted = new FormattedText(displayed.Length > 0 ? displayed : "Ag", CultureInfo.GetCultureInfo("vi-VN"), input.FlowDirection,
+                new Typeface(input.FontFamily, input.FontStyle, input.FontWeight, input.FontStretch), input.FontSize, Brushes.White, VisualTreeHelper.GetDpi(input).PixelsPerDip);
+            if (input is TextBox wrapping && wrapping.TextWrapping != TextWrapping.NoWrap) formatted.MaxTextWidth = Math.Max(1, host.ViewportWidth);
+            Require(host.ViewportHeight > 0 && formatted.Height <= host.ViewportHeight + 1 && host.ExtentHeight <= host.ViewportHeight + 1,
+                $"Vertical input clipping: {name}/{input.Name}; viewport={host.ViewportHeight:F2}, extent={host.ExtentHeight:F2}, line={formatted.Height:F2} DIP.");
+            int glyphRuns = 0;
+            foreach (Visual visual in Descendants(host).OfType<Visual>())
+                if (VisualTreeHelper.GetDrawing(visual) is { } drawing)
+                    foreach (GlyphRunDrawing glyph in Glyphs(drawing))
+                    {
+                        Require(!glyph.GlyphRun.GlyphIndices.Contains((ushort)0), "Missing input glyph: " + input.Name);
+                        foreach (string family in glyph.GlyphRun.GlyphTypeface.FamilyNames.Values) renderedFonts.Add(family);
+                        glyphRuns++;
+                    }
+            Require(displayed.Length == 0 || glyphRuns > 0, "No rendered input glyph evidence: " + input.Name);
+            inputs.Add(new { name = input.Name, type = input.GetType().Name, font = input.FontFamily.Source, input.FontSize,
+                lineHeight = formatted.Height, host.ExtentHeight, host.ViewportHeight, glyphRuns, displayedCharacters = displayed.Length });
+        }
         Require(renderedFonts.Count > 0, "No rendered glyph evidence: " + name);
-        return new { name, textBlocks = text.Length, windowFont = window.FontFamily.Source, renderedFonts, actualDpi = VisualTreeHelper.GetDpi(window).PixelsPerInchX, simulatedScalePercent = percent, layoutWidth = content.ActualWidth, layoutHeight = content.ActualHeight };
+        return new { name, textBlocks = text.Length, inputs, windowFont = window.FontFamily.Source, renderedFonts, actualDpi = VisualTreeHelper.GetDpi(window).PixelsPerInchX, simulatedScalePercent = percent, layoutWidth = renderRoot.ActualWidth, layoutHeight = renderRoot.ActualHeight, pixelWidth = bitmap.PixelWidth, pixelHeight = bitmap.PixelHeight };
     }
 
     private static void AssertVisibility(Window window, int page)
