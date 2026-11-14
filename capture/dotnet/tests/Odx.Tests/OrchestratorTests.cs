@@ -674,6 +674,69 @@ public sealed class OrchestratorTests : IAsyncLifetime
     }
 
     [Theory]
+    [InlineData("ARMA3_ESC_PRESSED", false)]
+    [InlineData("ARMA3_ESC_PRESSED", true)]
+    [InlineData("ARMA3_CAMERA_MODE_CHANGED", false)]
+    [InlineData("ARMA3_CAMERA_MODE_CHANGED", true)]
+    public async Task Esc_or_camera_change_from_any_member_stops_four_player_party_and_marks_all_takes_for_retake(
+        string code, bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "party4-template"));
+        string[] players = ["party4-host", "party4-member1", "party4-member2", "party4-member3"];
+        var report = new CaptureReport(1416, 1416, 30, 0, 0, 0, true, "process", CaptureReport.Aligned, 0, null, null);
+        foreach (string playerId in players) FakeCapture.Reports[playerId] = report;
+
+        var (host, hostStarted, roomCode) = await HostRoom(players[0], template: template);
+        var members = players.Skip(1).Select(player => Connect(template, player, roomCode)).ToArray();
+        await WaitForAgents(4, roomCode);
+        foreach (var member in members) await member.Agent.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(roomCode);
+            if (room["members"]!.AsArray().All(m =>
+                (string?)m!["player_id"] == players[0] || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
+
+        var recorded = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files =>
+            recorded.TrySetResult(JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!);
+
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(new[] { hostStarted }.Concat(members.Select(m => m.Started))).WaitAsync(TimeSpan.FromSeconds(10));
+
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(roomCode);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        string triggerPlayer = hostTriggers ? players[0] : players[2];
+        string reason = code == "ARMA3_ESC_PRESSED"
+            ? "RETAKE_REQUIRED: a Party member pressed ESC during recording."
+            : "RETAKE_REQUIRED: a Party member changed camera view during recording.";
+        FakeCapture.Instances[triggerPlayer].RequestGuardStop(new Arma3GuardStop(code, reason));
+
+        var record = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal(4, record.Players.Count);
+        Assert.NotNull(record.EndUtcMs);
+        Assert.All(record.Players, player =>
+        {
+            Assert.Equal(CaptureReport.Failed, player.Verdict ?? string.Empty);
+            Assert.Contains(player.Problems!, problem => problem.Contains("RETAKE_REQUIRED", StringComparison.Ordinal));
+            Assert.Contains("RETAKE_REQUIRED", player.Report?.Failure ?? string.Empty);
+        });
+        Assert.All(players, playerId =>
+            Assert.Equal(record.EndUtcMs, FakeCapture.RoundTimes[playerId].End));
+        Assert.Contains("RECORD AGAIN", AgentClient.RoundSummary(record));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task FocusLossFromAnyPartyMemberStopsEveryParticipantAtOneEndTimestamp(bool hostTriggers)
