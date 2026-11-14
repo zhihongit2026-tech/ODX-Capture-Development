@@ -27,7 +27,7 @@ public sealed record GameItem(string Label, string? Path, string? WindowProcess 
 }
 
 /// <summary>One player's live recorder frame count, or a waiting row until telemetry arrives.</summary>
-public sealed record FrameMetricItem(string Name, string RoleText, string FramesText, string DetailText, double ProgressValue, bool HasData);
+public sealed record FrameMetricItem(string Name, string RoleText, string FramesText, string DetailText, double ProgressValue, double TargetValue, bool HasData);
 
 /// <summary>One member currently present in the Protocol 5 room and their actual Ready state.</summary>
 public sealed record PartyMemberViewItem(string Name, string RoleText, string ReadyText, bool IsReady);
@@ -215,7 +215,7 @@ public partial class MainWindow : Window
         HotkeyHelpText.Text = _t.HotkeyHelp;
         AiGuardHelpText.Text = _t.AiGuardHelp;
         FramesChartTitleText.Text = _t.FramesChartTitle;
-        FramesChartTargetText.Text = _t.FramesChartTarget;
+        FramesChartTargetText.Text = _t.FramesChartTarget(PartyRoundRequirements.MinimumVideoFrames);
         PartyRosterTitleText.Text = _t.PartyRosterTitle;
         PartyRosterSubtitleText.Text = _t.PartyRosterSubtitle;
         LanguageLabel.Content = _t.Language;
@@ -1208,20 +1208,27 @@ public partial class MainWindow : Window
                     member.PlayerId == _room?.Agent.PlayerId ? _t.PartyYou : _t.PartyMember;
                 frameItems.Add(new FrameMetricItem(member.Name, role,
                     hasData ? $"{frames.ToString("N0", CultureInfo.CurrentCulture)} / {targetFrames.ToString("N0", CultureInfo.CurrentCulture)}" : _t.FramesChartWaiting,
-                    detail, Math.Min(frames, targetFrames), hasData));
+                    detail, Math.Min(frames, targetFrames), targetFrames, hasData));
             }
         }
-        else if (_room is null && _run is not null)
+        else
         {
-            long? currentFrames = _run.LastStatus?.Frames;
-            bool hasData = currentFrames is long;
-            long frames = currentFrames ?? 0;
-            string name = string.IsNullOrWhiteSpace(_settings.PlayerName) ? _t.LocalDevice : _settings.PlayerName.Trim();
-            string detail = !hasData ? _t.FramesChartWaiting :
-                frames >= targetFrames ? _t.FramesChartTargetReached : _t.FramesChartRemaining(targetFrames - frames);
-            frameItems.Add(new FrameMetricItem(name, _t.LocalCapture,
-                hasData ? $"{frames.ToString("N0", CultureInfo.CurrentCulture)} / {targetFrames.ToString("N0", CultureInfo.CurrentCulture)}" : _t.FramesChartWaiting,
-                detail, Math.Min(frames, targetFrames), hasData));
+            // A round can reuse the same Task ID. Clear cached remote counts between rounds
+            // so the next round never inherits the previous round's last frame value.
+            _partyFrameCache.Clear();
+            _dashboardFrameSessionId = null;
+            if (_room is null && _run is not null)
+            {
+                long? currentFrames = _run.LastStatus?.Frames;
+                bool hasData = currentFrames is long;
+                long frames = currentFrames ?? 0;
+                string name = string.IsNullOrWhiteSpace(_settings.PlayerName) ? _t.LocalDevice : _settings.PlayerName.Trim();
+                string detail = !hasData ? _t.FramesChartWaiting :
+                    frames >= targetFrames ? _t.FramesChartTargetReached : _t.FramesChartRemaining(targetFrames - frames);
+                frameItems.Add(new FrameMetricItem(name, _t.LocalCapture,
+                    hasData ? $"{frames.ToString("N0", CultureInfo.CurrentCulture)} / {targetFrames.ToString("N0", CultureInfo.CurrentCulture)}" : _t.FramesChartWaiting,
+                    detail, Math.Min(frames, targetFrames), targetFrames, hasData));
+            }
         }
 
         string frameSignature = string.Join("|", frameItems.Select(item =>

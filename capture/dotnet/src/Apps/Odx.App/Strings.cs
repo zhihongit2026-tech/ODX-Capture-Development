@@ -38,7 +38,7 @@ public sealed class Strings
     public required string HotkeyHelp { get; init; }
     public required string AiGuardHelp { get; init; }
     public required string FramesChartTitle { get; init; }
-    public required string FramesChartTarget { get; init; }
+    public required Func<long, string> FramesChartTarget { get; init; }
     public required string FramesChartNoCapture { get; init; }
     public required string FramesChartNoRound { get; init; }
     public required string FramesChartWaiting { get; init; }
@@ -196,7 +196,7 @@ public sealed class Strings
         HotkeyHelp = "Select the field and press a new key combination.",
         AiGuardHelp = "AI Guard runs in its independent click-through overlay during supported recording sessions.",
         FramesChartTitle = "FRAMES / LIVE PROGRESS",
-        FramesChartTarget = "TARGET: 7,000 FRAMES PER PLAYER",
+        FramesChartTarget = target => $"TARGET: {target:N0} FRAMES PER PLAYER",
         FramesChartNoCapture = "Start a recording or join a Party to see live frame measurements.",
         FramesChartNoRound = "No active round. Frame measurements appear when a round starts.",
         FramesChartWaiting = "Waiting for live frame data…",
@@ -380,7 +380,7 @@ public sealed class Strings
         HotkeyHelp = "Có thể đổi phím tắt bằng cách chọn ô và nhấn tổ hợp phím mới.",
         AiGuardHelp = "AI Guard hiển thị dưới dạng lớp phủ độc lập, không nhận thao tác chuột, trong các phiên ghi hình được hỗ trợ.",
         FramesChartTitle = "BIỂU ĐỒ FRAMES / TIẾN ĐỘ LIVE",
-        FramesChartTarget = "MỤC TIÊU: 7.000 FRAME / THÀNH VIÊN",
+        FramesChartTarget = target => $"MỤC TIÊU: {target:N0} FRAME / THÀNH VIÊN",
         FramesChartNoCapture = "Bắt đầu ghi hình hoặc tham gia Party để theo dõi Frames trực tiếp.",
         FramesChartNoRound = "Chưa có lượt ghi hình. Biểu đồ Frames sẽ cập nhật khi lượt bắt đầu.",
         FramesChartWaiting = "Đang chờ dữ liệu Frames trực tiếp…",
@@ -393,7 +393,7 @@ public sealed class Strings
         PartyRosterNoMembers = "Chưa có thành viên",
         PartyRosterCount = count => $"{count} thành viên",
         PartyReady = "SẴN SÀNG",
-        PartyNotReady = "CHƯA SẴN SÀNG",
+        PartyNotReady = "KHÔNG SẴN SÀNG",
         PartyHost = "HOST",
         PartyYou = "BẠN",
         PartyMember = "THÀNH VIÊN",

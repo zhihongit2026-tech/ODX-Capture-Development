@@ -715,7 +715,7 @@
                                                         <TextBlock Text="{Binding RoleText}" Foreground="#72B6CD" FontSize="10" Margin="0,2,0,0" />
                                                     </StackPanel>
                                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FramesText}" Foreground="#D9F5FC" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="12,0,0,0" />
-                                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Minimum="0" Maximum="7000" Value="{Binding ProgressValue}" IsEnabled="{Binding HasData}" Style="{StaticResource FramesProgressBar}" Margin="0,8,0,0" />
+                                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Minimum="0" Maximum="{Binding TargetValue}" Value="{Binding ProgressValue}" IsEnabled="{Binding HasData}" Style="{StaticResource FramesProgressBar}" Margin="0" />
                                                     <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DetailText}" Foreground="#8CAFC1" FontSize="10" Margin="0,5,0,0" />
                                                 </Grid>
                                             </DataTemplate>
