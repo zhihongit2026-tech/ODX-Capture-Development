@@ -31,6 +31,16 @@ public sealed record CaptureReport(long Frames, long? RoundFrames, double Fps, l
 {
     public const string Ok = "ok", Degraded = "degraded", Failed = "failed";
     public const string Aligned = "aligned";
+
+    /// <summary>Applies a per-video minimum frame requirement without changing the recorded frame count.</summary>
+    public CaptureReport RequireMinimumFrames(long minimum)
+    {
+        if (minimum < 0) throw new ArgumentOutOfRangeException(nameof(minimum));
+        if (Frames >= minimum) return this;
+        string issue = $"video frames below required minimum: {Frames}/{minimum}";
+        string failure = Failure is null ? issue : Failure + "; " + issue;
+        return this with { Failure = failure };
+    }
     /// <summary>
     /// Starved frames (captured, dropped because the encoder had not returned a buffer) over this share of the frames say
     /// the encoder is behind. Duplicates alone do not: a player standing still, a loading screen or a game under the grid
