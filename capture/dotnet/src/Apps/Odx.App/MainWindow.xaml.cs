@@ -145,21 +145,62 @@ public partial class MainWindow : Window
         if (configError is not null) SetStatus(t => t.ConfigInvalid(configError));
     }
 
-    // Dashboard navigation only changes the visible scroll position; all existing controls and handlers remain active.
-    private void NavigateDashboard_Click(object sender, RoutedEventArgs e) =>
-        DashboardScroll.ScrollToVerticalOffset(0);
+    // Window chrome controls preserve the existing tray, close and restore lifecycle.
+    private void WindowMinimize_Click(object sender, RoutedEventArgs e) =>
+        SystemCommands.MinimizeWindow(this);
 
-    private void NavigateCapture_Click(object sender, RoutedEventArgs e) =>
+    private void WindowMaximize_Click(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    private void WindowClose_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void SetActiveNavigation(Button active)
+    {
+        foreach (var item in new[] { NavDashboard, NavCapture, NavParty, NavSettings })
+        {
+            item.Background = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(6, 26, 41));
+            item.BorderBrush = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(6, 26, 41));
+        }
+
+        active.Background = new System.Windows.Media.LinearGradientBrush(
+            System.Windows.Media.Color.FromRgb(7, 73, 93),
+            System.Windows.Media.Color.FromRgb(4, 39, 59), 90);
+        active.BorderBrush = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(32, 217, 239));
+    }
+
+    // Dashboard navigation only changes the visible scroll position; all existing controls and handlers remain active.
+    private void NavigateDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavDashboard);
+        DashboardScroll.ScrollToVerticalOffset(0);
+    }
+
+    private void NavigateCapture_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavCapture);
         DashboardScroll.ScrollToVerticalOffset(Math.Max(0, CaptureCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
             + DashboardScroll.VerticalOffset));
+    }
 
-    private void NavigateParty_Click(object sender, RoutedEventArgs e) =>
+    private void NavigateParty_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavParty);
         DashboardScroll.ScrollToVerticalOffset(Math.Max(0, PartyCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
             + DashboardScroll.VerticalOffset));
+    }
 
-    private void NavigateSettings_Click(object sender, RoutedEventArgs e) =>
+    private void NavigateSettings_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavSettings);
         DashboardScroll.ScrollToVerticalOffset(Math.Max(0, SettingsCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
             + DashboardScroll.VerticalOffset));
+    }
 
     private void ApplyLanguage()
     {
@@ -227,6 +268,8 @@ public partial class MainWindow : Window
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
+        if (MaximizeButton?.Content is System.Windows.Controls.TextBlock maximizeIcon)
+            maximizeIcon.Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
         if (WindowState == WindowState.Minimized) Hide();
     }
 
@@ -431,8 +474,9 @@ public partial class MainWindow : Window
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
         CreateButton.IsEnabled = idle || inRoom && _agent!.IsHost;
         CreateButton.Visibility = inRoom && !_agent!.IsHost ? Visibility.Collapsed : Visibility.Visible;
-        // In a room the host's game (chosen here before opening it) and the orchestrator's frame rate apply.
-        GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
+        // Keep the selected game profile and FPS visible as read-only context in a room.
+        // The host's game and orchestrator's frame rate remain authoritative; the existing IsEnabled rules prevent edits.
+        GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
     }
