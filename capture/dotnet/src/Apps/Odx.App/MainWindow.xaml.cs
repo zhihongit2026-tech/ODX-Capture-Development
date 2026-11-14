@@ -127,6 +127,7 @@ public partial class MainWindow : Window
         NameBox.Text = _settings.PlayerName;
         var roomRows = _config.Orchestrator is null ? Visibility.Collapsed : Visibility.Visible;
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
+        PartyCard.Visibility = NavParty.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); };
@@ -173,6 +174,13 @@ public partial class MainWindow : Window
             System.Windows.Media.Color.FromRgb(4, 39, 59), 90);
         active.BorderBrush = new System.Windows.Media.SolidColorBrush(
             System.Windows.Media.Color.FromRgb(32, 217, 239));
+        active.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            Color = System.Windows.Media.Color.FromRgb(0, 217, 245),
+            BlurRadius = 17,
+            ShadowDepth = 0,
+            Opacity = 0.34,
+        };
     }
 
     // Dashboard navigation only changes the visible scroll position; all existing controls and handlers remain active.
@@ -447,6 +455,9 @@ public partial class MainWindow : Window
         else if (_run is not null && !_clock.IsEnabled) _clock.Start();
         if (state is RunState.Idle or RunState.Stopping) CancelAutoStop();
         bool idle = state == RunState.Idle;
+        StartStopButton.Tag = state == RunState.Countdown ? "\uE711" :
+            state == RunState.Stopping || state == RunState.Starting || state == RunState.Recording ||
+            state == RunState.Agent && _agent?.Room?.CurrentSession is not null ? "\uE71A" : "\uE768";
         StartStopButton.Content = state switch
         {
             RunState.Idle => _t.Start,
