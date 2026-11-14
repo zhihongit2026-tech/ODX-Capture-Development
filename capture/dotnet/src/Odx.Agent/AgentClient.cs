@@ -399,7 +399,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or InvalidOperationException or ObjectDisposedException)
         {
             Interlocked.CompareExchange(ref _focusStopRequestedSession, null, session);
-            Log?.Invoke($"guard/focus stop in {session}: could not relay Party stop: {e.Message}");
+            Log?.Invoke($"guard/focus stop in {session}: could not relay Party stop: {e.Message}; stopping Host capture locally");
+            StopCapture();
         }
     }
 
