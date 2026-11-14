@@ -56,6 +56,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _preflightTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly Forms.NotifyIcon _tray = new();
     private readonly Forms.ToolStripMenuItem _trayStartStop = new(), _trayShow = new(), _trayExit = new();
+    private readonly System.Drawing.Font _trayFont = new("Segoe UI", 10.5f,
+        System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point);
     private Strings _t = Strings.En;
     /// <summary>Renders the status line; kept so a language switch re-renders it.</summary>
     private Func<Strings, string> _status = t => t.Ready;
@@ -111,6 +113,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Width = Math.Min(Width, SystemParameters.WorkArea.Width);
+        Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         _obsRows = _settings.RecordWithObs;
         _t = Strings.For(_settings.Language ?? Strings.DefaultLanguage);
         string? configError = null;
@@ -136,7 +140,7 @@ public partial class MainWindow : Window
         NameBox.Text = _settings.PlayerName;
         var roomRows = _config.Orchestrator is null ? Visibility.Collapsed : Visibility.Visible;
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
-        PartyPage.Visibility = NavParty.Visibility = roomRows;
+        NavParty.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); RefreshDashboardMonitor(); };
@@ -146,13 +150,14 @@ public partial class MainWindow : Window
         _trayStartStop.Click += (_, _) => Toggle();
         using (var icon = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/odx.ico")).Stream)
             _tray.Icon = new System.Drawing.Icon(icon, Forms.SystemInformation.SmallIconSize);
-        _tray.ContextMenuStrip = new Forms.ContextMenuStrip();
+        _tray.ContextMenuStrip = new Forms.ContextMenuStrip { Font = _trayFont };
         _trayShow.Click += (_, _) => RestoreFromTray();
         _trayExit.Click += (_, _) => Close();
         _tray.ContextMenuStrip.Items.AddRange([_trayStartStop, _trayShow, _trayExit]);
         _tray.DoubleClick += (_, _) => RestoreFromTray();
         _tray.Visible = true;
         ApplyLanguage();
+        ShowWorkspacePage(OverviewPage, NavDashboard);
         RefreshDashboardMonitor();
         if (configError is not null) SetStatus(t => t.ConfigInvalid(configError));
     }
@@ -188,10 +193,9 @@ public partial class MainWindow : Window
 
     private void ShowWorkspacePage(FrameworkElement page, Button navigation)
     {
-        OverviewPage.Visibility = ReferenceEquals(page, OverviewPage) ? Visibility.Visible : Visibility.Collapsed;
-        CapturePage.Visibility = ReferenceEquals(page, CapturePage) ? Visibility.Visible : Visibility.Collapsed;
-        PartyPage.Visibility = ReferenceEquals(page, PartyPage) ? Visibility.Visible : Visibility.Collapsed;
-        SettingsPage.Visibility = ReferenceEquals(page, SettingsPage) ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var candidate in new[] { OverviewPage, CapturePage, PartyPage, SettingsPage })
+            if (!ReferenceEquals(page, candidate)) candidate.Visibility = Visibility.Collapsed;
+        page.Visibility = Visibility.Visible;
         SetActiveNavigation(navigation);
         DashboardScroll.ScrollToTop();
     }
@@ -310,7 +314,9 @@ public partial class MainWindow : Window
         StopQualityGuard();
         DisposeResourceSamplerWhenIdle();
         if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
+        _tray.ContextMenuStrip?.Dispose();
         _tray.Dispose();
+        _trayFont.Dispose();
         _packets.Dispose();
         base.OnClosed(e);
     }

@@ -1,4 +1,4 @@
-name: ODX Smart Guard G1.3 Dashboard Reference - Windows x64 QA (Protocol 5)
+name: ODX Smart Guard G1.3 Dashboard Fix1 - Windows x64 QA (Protocol 5)
 
 on:
   push:
@@ -76,7 +76,7 @@ jobs:
             throw 'OdxArma3.exe missing'
           }
 
-      - name: Assemble ODX 0.3.5 Smart Guard G1.3 Dashboard Reference QA package
+      - name: Assemble ODX 0.3.5 Smart Guard G1.3 Dashboard Fix1 QA package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -92,7 +92,7 @@ jobs:
             if (-not (Test-Path (Join-Path $original $rel))) { throw "Baseline package missing $rel" }
           }
 
-          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5-smartguard-g13 -o app-publish
+          dotnet publish capture/dotnet/src/Apps/Odx.App/Odx.App.csproj -c Release -r win-x64 --self-contained -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:Version=0.3.5-smartguard-g13-dashboard-fix1 -o app-publish
           if ($LASTEXITCODE -ne 0) { throw 'Smart Guard WPF publish failed' }
           $app = Join-Path (Get-Location) 'app-publish/odx-app.exe'
           if (-not (Test-Path $app)) { throw 'Patched odx-app.exe missing' }
@@ -109,7 +109,9 @@ jobs:
           $config | ConvertTo-Json -Depth 8 | Set-Content -Path $configFile -Encoding utf8
 
           @(
-            'ODX Capture 0.3.5 - Smart Guard G1.3 Dashboard Reference QA - Windows x64',
+            'ODX Capture 0.3.5 - Smart Guard G1.3 Dashboard Fix1 QA - Windows x64',
+            'UI fix: initialize Dashboard navigation safely during XAML startup and use consistent Vietnamese text rendering. Capture, Party Protocol 5 and AI Guard behavior are retained.',
+            'This is a QA candidate. UI test evidence is supplied separately; hosted Windows automation does not replace acceptance on Windows 10/11 at actual display DPI or live Capture, Arma 3 and Party sessions.',
             'Base: verified upstream ODX Capture 0.3.5 runtime. F10 and solo-capture timing are retained; Party Live rounds run for a synchronized 240 seconds from StartUtcMs.',
             'FPS: Arma 3 in-game diag_fps only. Below 50 FPS warns; below 45 FPS is critical after two 500 ms samples. Recorder/FFmpeg FPS never creates an FPS-drop alert.',
             'Party stop: ESC or camera-view change from any member of a four-player Party is relayed through existing Protocol 5 and the Host ToggleRound stop. All four takes must be recorded again.',
@@ -123,7 +125,7 @@ jobs:
             'Extract to a new folder for QA. Do not overwrite the working installation or existing data/, captures/ and previous takes.'
           ) | Set-Content -Path (Join-Path $original 'README-SMART-GUARD-G13.txt') -Encoding UTF8
 
-          $dest = 'odx-capture-0.3.5-smartguard-g13-dashboard-win-x64'
+          $dest = 'odx-capture-0.3.5-smartguard-g13-dashboard-fix1-win-x64'
           Move-Item $original $dest
           $required = @('Odx Capture.exe','bin/odx-app.exe','bin/odx.exe','bin/ffmpeg/ffmpeg.exe','tools/OdxArma3.exe','bin/odx-capture.json')
           foreach ($rel in $required) {
@@ -133,6 +135,16 @@ jobs:
           # Preserve empty data directories as real directory entries for Windows Explorer.
           foreach ($rel in @('data','data/captures','data/delivery','data/logs')) {
             New-Item -ItemType Directory -Force -Path (Join-Path $dest $rel) | Out-Null
+          }
+
+          # The runtime distribution must remain a clean package, separate from QA evidence and local state.
+          $unexpected = @(Get-ChildItem -LiteralPath $dest -File -Recurse -Force | Where-Object {
+            $_.Extension -in @('.log', '.tmp', '.trx', '.pdb') -or
+            $_.Name -eq 'ui-state.json' -or
+            $_.FullName -match '[/\\](?:TestResults|qa-evidence|\.cache|obj)[/\\]'
+          })
+          if ($unexpected.Count -ne 0) {
+            throw "QA package contains temporary or diagnostic files: $($unexpected.Name -join ', ')"
           }
 
           Add-Type -AssemblyName System.IO.Compression
@@ -170,17 +182,74 @@ jobs:
           $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
           $launcherHash = (Get-FileHash (Join-Path $dest 'tools/OdxArma3.exe') -Algorithm SHA256).Hash
           $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
-          @("odx-app.exe SHA256: $exeHash","OdxArma3.exe SHA256: $launcherHash","package ZIP SHA256: $zipHash") |
+          $sourceZip = 'odx-capture-0.3.5-smartguard-g13-dashboard-fix1-source.zip'
+          git archive --format=zip --prefix=odx-capture-dashboard-fix1-source/ -o $sourceZip $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Commit-pinned source archive failed' }
+          $sourceHash = (Get-FileHash $sourceZip -Algorithm SHA256).Hash
+          @("source commit: $env:GITHUB_SHA","odx-app.exe SHA256: $exeHash","OdxArma3.exe SHA256: $launcherHash","package ZIP SHA256: $zipHash","source ZIP SHA256: $sourceHash") |
             Set-Content -Path SHA256SUMS.txt -Encoding ASCII
           Write-Host "EXE SHA256: $exeHash"
           Write-Host "OdxArma3 SHA256: $launcherHash"
           Write-Host "ZIP SHA256: $zipHash"
+          Write-Host "Source ZIP SHA256: $sourceHash"
 
-      - uses: actions/upload-artifact@v4
+      - name: Exercise the packaged Windows UI and inspect WPF layout
+        timeout-minutes: 12
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageZip = Join-Path (Get-Location) 'odx-capture-0.3.5-smartguard-g13-dashboard-fix1-win-x64.zip'
+          $packageHash = (Get-FileHash $packageZip -Algorithm SHA256).Hash
+          $testRoot = Join-Path $env:RUNNER_TEMP "odx-dashboard-ui-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $evidence = Join-Path (Get-Location) 'qa-evidence'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          @{
+            commit = $env:GITHUB_SHA
+            branch = $env:GITHUB_REF_NAME
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            runner_os = [Environment]::OSVersion.VersionString
+            runner_image = $env:ImageOS
+            runner_image_version = $env:ImageVersion
+            package_sha256 = $packageHash
+            scope = 'Packaged process UI smoke plus WPF layout inspection'
+            limitations = @(
+              'Hosted Windows runner is not Windows 10/11 desktop acceptance.',
+              'WPF layout scaling does not certify actual OS display DPI.',
+              'Live game, recording, OBS exclusion and four-machine Party acceptance require their real environments.'
+            )
+          } | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $evidence 'environment.json') -Encoding utf8
+          # Exercise a disposable copy of the actual ZIP, never the distribution or a user installation.
+          Expand-Archive -LiteralPath $packageZip -DestinationPath $testRoot
+          try {
+            dotnet run --project capture/dotnet/tests/Odx.Ui.Tests -c Release -- --package $testRoot --output (Join-Path $evidence 'UI')
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged UI regression or WPF layout inspection failed; inspect the QA evidence artifact' }
+          }
+          finally {
+            if ((Get-FileHash $packageZip -Algorithm SHA256).Hash -ne $packageHash) {
+              throw 'UI verification modified the distribution ZIP'
+            }
+          }
+
+      - name: Upload separate QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Dashboard-Reference-Windows-x64
+          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Dashboard-Fix1-QA-Evidence-Windows-x64
           path: |
-            odx-capture-0.3.5-smartguard-g13-dashboard-win-x64.zip
+            qa-evidence/
+            capture/dotnet/tests/Odx.Tests/TestResults/*.trx
+            capture/native/extractor/build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload the verified QA candidate and matching source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Dashboard-Fix1-Windows-x64
+          path: |
+            odx-capture-0.3.5-smartguard-g13-dashboard-fix1-win-x64.zip
+            odx-capture-0.3.5-smartguard-g13-dashboard-fix1-source.zip
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

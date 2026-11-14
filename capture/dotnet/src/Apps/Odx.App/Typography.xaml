@@ -1,0 +1,55 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <FontFamily x:Key="AppFontFamily">Segoe UI, Tahoma, Arial, Global User Interface</FontFamily>
+
+    <Style x:Key="AppControlTypography" TargetType="{x:Type Control}">
+        <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
+        <Setter Property="FontSize" Value="14" />
+    </Style>
+    <Style x:Key="AppWindowTypography" TargetType="{x:Type Window}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppLabelTypography" TargetType="{x:Type Label}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppTextBoxTypography" TargetType="{x:Type TextBox}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppPasswordBoxTypography" TargetType="{x:Type PasswordBox}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppComboBoxTypography" TargetType="{x:Type ComboBox}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppComboBoxItemTypography" TargetType="{x:Type ComboBoxItem}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppCheckBoxTypography" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style x:Key="AppButtonTypography" TargetType="{x:Type Button}" BasedOn="{StaticResource AppControlTypography}" />
+    <Style TargetType="{x:Type Label}" BasedOn="{StaticResource AppLabelTypography}" />
+    <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource AppTextBoxTypography}" />
+    <Style TargetType="{x:Type PasswordBox}" BasedOn="{StaticResource AppPasswordBoxTypography}" />
+    <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource AppComboBoxTypography}" />
+    <Style TargetType="{x:Type ComboBoxItem}" BasedOn="{StaticResource AppComboBoxItemTypography}" />
+    <Style TargetType="{x:Type CheckBox}" BasedOn="{StaticResource AppCheckBoxTypography}" />
+    <Style TargetType="{x:Type Button}" BasedOn="{StaticResource AppButtonTypography}" />
+    <Style TargetType="{x:Type ToolTip}" BasedOn="{StaticResource AppControlTypography}">
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style x:Key="AppTextBlockTypography" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
+        <Setter Property="FontSize" Value="14" />
+    </Style>
+    <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}" />
+    <Style x:Key="PageTitleTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}">
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="GroupTitleTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}">
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="BodyTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}" />
+    <Style x:Key="ButtonTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}">
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="CaptionTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}">
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style x:Key="StatusTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}">
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style x:Key="CountdownNumberTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource AppTextBlockTypography}">
+        <Setter Property="FontSize" Value="110" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+</ResourceDictionary>

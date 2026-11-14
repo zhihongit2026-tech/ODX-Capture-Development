@@ -1,11 +1,11 @@
-<Window x:Class="Odx.App.CountdownOverlay"
+<Window Style="{StaticResource AppWindowTypography}" x:Class="Odx.App.CountdownOverlay"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Odx Capture countdown" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
         SizeToContent="WidthAndHeight" WindowStartupLocation="CenterScreen" IsHitTestVisible="False">
     <Border Background="#B0000000" CornerRadius="24" MinWidth="180" Height="180" Padding="32,0">
-        <TextBlock x:Name="Number" Foreground="White" FontSize="110" FontWeight="SemiBold"
+        <TextBlock Style="{StaticResource CountdownNumberTextStyle}" x:Name="Number" Foreground="White" FontWeight="SemiBold"
                    HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Border>
 </Window>
