@@ -60,6 +60,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private ICaptureRun? _run;
     private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId, _focusStopRequestedSession;
     private string? _guardStopSessionId, _guardStopProblem, _retakeRequiredSessionId, _retakeRequiredReason;
+    private string? _partyAlertsSessionId, _partyAlertsProblem, _lastSentPartyAlertsProblem;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -130,6 +131,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     public RoomUpdate? Room { get; private set; }
 
     public bool IsHost => Room?.HostPlayerId == options.PlayerId;
+    public string PlayerId => options.PlayerId;
 
     /// <summary>The capture in progress (odx-app shows its counters); null between sessions.</summary>
     public ICaptureRun? CurrentRun => _run;
@@ -344,9 +346,13 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         if (guardReporter is not null)
         {
             string code = guardReporter.Problem![guardPrefix.Length..];
-            string reason = code == "ARMA3_COMMAND_MENU"
-                ? "RETAKE_REQUIRED: Arma 3 command menu was open during recording. Close it with Backspace and record the whole Party again."
-                : $"RETAKE_REQUIRED: game guard stop ({code}). Record the whole Party again.";
+            string reason = code switch
+            {
+                "ARMA3_COMMAND_MENU" => "RETAKE_REQUIRED: Arma 3 command menu was open during recording. Close it with Backspace and record the whole Party again.",
+                "ARMA3_ESC_PRESSED" => "RETAKE_REQUIRED: a Party member pressed ESC during recording. Record the whole Party again.",
+                "ARMA3_CAMERA_MODE_CHANGED" => "RETAKE_REQUIRED: a Party member changed camera view during recording. Record the whole Party again.",
+                _ => $"RETAKE_REQUIRED: game guard stop ({code}). Record the whole Party again.",
+            };
             lock (_gate)
             {
                 _retakeRequiredSessionId = session;
@@ -441,6 +447,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         if (!ToggleRound.IsValidSessionId(sessionId) ||
             string.IsNullOrWhiteSpace(code) || code.Any(c => !(char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_')))
             return false;
+        if (code is "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED" && Room?.Members.Count != 4)
+            return false;
 
         bool active;
         string marker = GuardStopProblem(sessionId, code);
@@ -480,6 +488,60 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         StopCapture();
         return false;
     }
+
+    /// <summary>
+    /// Publishes this member's current warning set using the existing Protocol 5 AgentState. The unchanged
+    /// Orchestrator broadcasts it in RoomUpdate; peers can display the member's warnings within five seconds.
+    /// </summary>
+    public async Task<bool> ReportAlertsAsync(string sessionId, IReadOnlyList<QualityAlert> alerts, CancellationToken stop)
+    {
+        if (!ToggleRound.IsValidSessionId(sessionId)) return false;
+        string? problem;
+        lock (_gate)
+        {
+            bool active = (_run is not null && _runSessionId == sessionId) || _startingSessionId == sessionId;
+            if (!active) return false;
+
+            problem = _focusLostSessionId == sessionId ? FocusLostProblem(sessionId) :
+                _guardStopSessionId == sessionId ? _guardStopProblem :
+                alerts.Any(a => a.Severity is QualityAlertSeverity.Warning or QualityAlertSeverity.Critical)
+                    ? PartyAlertCodec.Encode(sessionId, alerts)
+                    : _run?.Problem;
+
+            if (_partyAlertsSessionId == sessionId &&
+                string.Equals(_lastSentPartyAlertsProblem, problem, StringComparison.Ordinal))
+                return true;
+
+            _partyAlertsSessionId = sessionId;
+            _partyAlertsProblem = problem;
+        }
+
+        try
+        {
+            await SendAsync(new AgentState("recording", sessionId, problem), stop);
+            lock (_gate)
+            {
+                if (_partyAlertsSessionId == sessionId &&
+                    string.Equals(_partyAlertsProblem, problem, StringComparison.Ordinal))
+                    _lastSentPartyAlertsProblem = problem;
+            }
+            return true;
+        }
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
+                                  e is OperationCanceledException && !stop.IsCancellationRequested)
+        {
+            lock (_gate)
+            {
+                if (_partyAlertsSessionId == sessionId &&
+                    string.Equals(_partyAlertsProblem, problem, StringComparison.Ordinal))
+                    _lastSentPartyAlertsProblem = null; // next one-second poll retries the update
+            }
+            return false;
+        }
+    }
+
+    public static bool TryReadPartyAlerts(string? problem, string sessionId, out QualityAlert[] alerts) =>
+        PartyAlertCodec.TryDecode(problem, sessionId, out alerts);
 
     public async Task LeaveRoomAsync(CancellationToken stop)
     {
@@ -654,6 +716,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                     _focusLostSessionId = null;
                     _guardStopSessionId = null;
                     _guardStopProblem = null;
+                    _partyAlertsSessionId = null;
+                    _partyAlertsProblem = null;
+                    _lastSentPartyAlertsProblem = null;
                     _retakeRequiredSessionId = null;
                     _retakeRequiredReason = null;
                     _stopBeforeStart = CancellationTokenSource.CreateLinkedTokenSource(stop);
@@ -744,6 +809,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _focusLostSessionId = null;
             _guardStopSessionId = null;
             _guardStopProblem = null;
+            _partyAlertsSessionId = null;
+            _partyAlertsProblem = null;
+            _lastSentPartyAlertsProblem = null;
             if (stopped.IsCancellationRequested) run.Stop();
         }
         await SendAsync(new AgentState("recording", s.SessionId), stop);
@@ -753,33 +821,20 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             string? reportedProblem;
             lock (_gate)
                 reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) :
-                    _guardStopSessionId == s.SessionId ? _guardStopProblem : problem;
+                    _guardStopSessionId == s.SessionId ? _guardStopProblem :
+                    _partyAlertsSessionId == s.SessionId ? _partyAlertsProblem : problem;
             _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving", s.SessionId, reportedProblem), stop);
         };
         if (run is IGameGuardCaptureRun gameGuard)
         {
-            gameGuard.GuardStopRequested += reason => _ = ReportGuardStopAsync(s.SessionId, "ARMA3_COMMAND_MENU", reason, stop);
+            gameGuard.GuardStopRequested += requested =>
+                _ = ReportGuardStopAsync(s.SessionId, requested.Code, requested.Reason, stop);
             gameGuard.GameAlertsChanged += alerts =>
-            {
-                string? reportedProblem;
-                lock (_gate)
-                {
-                    reportedProblem = _focusLostSessionId == s.SessionId ? FocusLostProblem(s.SessionId) :
-                        _guardStopSessionId == s.SessionId ? _guardStopProblem :
-                        alerts.Where(a => a.Severity != QualityAlertSeverity.Info)
-                            .Select(a => $"{a.Code}: {a.Detail}").FirstOrDefault();
-                }
-                _ = SendAsync(new AgentState(run.Phase == CapturePhase.Recording ? "recording" : "saving",
-                    s.SessionId, reportedProblem), stop);
-            };
-            if (gameGuard.GuardStopReason is { } existingReason)
-                _ = ReportGuardStopAsync(s.SessionId, "ARMA3_COMMAND_MENU", existingReason, stop);
+                _ = ReportAlertsAsync(s.SessionId, alerts, stop);
+            if (gameGuard.GuardStop is { } existingStop)
+                _ = ReportGuardStopAsync(s.SessionId, existingStop.Code, existingStop.Reason, stop);
             else if (gameGuard.GameAlerts.Count > 0)
-            {
-                string? problem = gameGuard.GameAlerts.Where(a => a.Severity != QualityAlertSeverity.Info)
-                    .Select(a => $"{a.Code}: {a.Detail}").FirstOrDefault();
-                if (problem is not null) _ = SendAsync(new AgentState("recording", s.SessionId, problem), stop);
-            }
+                _ = ReportAlertsAsync(s.SessionId, gameGuard.GameAlerts, stop);
         }
         Log?.Invoke($"recording {s.SessionId} into {run.SessionDir}");
         if (Clock is { } clock)
@@ -809,6 +864,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _runSessionId = null;
                 if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
                 if (_guardStopSessionId == s.SessionId) { _guardStopSessionId = null; _guardStopProblem = null; }
+                if (_partyAlertsSessionId == s.SessionId) { _partyAlertsSessionId = null; _partyAlertsProblem = null; _lastSentPartyAlertsProblem = null; }
                 if (_retakeRequiredSessionId == s.SessionId) { _retakeRequiredSessionId = null; _retakeRequiredReason = null; }
             }
             string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
@@ -831,6 +887,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _runSessionId = null;
             if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
             if (_guardStopSessionId == s.SessionId) { _guardStopSessionId = null; _guardStopProblem = null; }
+            if (_partyAlertsSessionId == s.SessionId) { _partyAlertsSessionId = null; _partyAlertsProblem = null; _lastSentPartyAlertsProblem = null; }
             if (_retakeRequiredSessionId == s.SessionId) { _retakeRequiredSessionId = null; _retakeRequiredReason = null; }
         }
     }
