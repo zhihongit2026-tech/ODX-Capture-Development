@@ -9,7 +9,7 @@ public sealed record ResourceSnapshot(
     double? GpuEncodePercent = null,
     double? DedicatedVramPercent = null,
     double? GpuTemperatureC = null,
-    double? FreshFps = null,
+    double? GameFps = null,
     double? EncoderStarvationPercent = null);
 
 /// <summary>
@@ -52,13 +52,13 @@ public sealed class ResourceGuard
                 "RAM sử dụng cao", $"RAM đã dùng: {ram:0.#}%; còn trống {available:0.#}%.",
                 "RAM gần cạn", $"RAM đã dùng: {ram:0.#}%; còn trống {available:0.#}%.", nowUtc);
 
-        if (sample.Gpu3DPercent is double gpu3d && sample.FreshFps is double fps)
+        if (sample.Gpu3DPercent is double gpu3d && sample.GameFps is double fps)
         {
-            bool fpsDegraded = fps < 30;
+            bool fpsDegraded = fps < 50;
             Update("RESOURCE_GPU_3D", gpu3d >= 95 && fpsDegraded, gpu3d >= 98 && fpsDegraded, gpu3d < 85,
                 TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
-                "GPU 3D tải cao kèm giảm FPS", $"GPU 3D: {gpu3d:0.#}%; FPS nguồn: {fps:0.#}.",
-                "GPU 3D quá tải kèm giảm FPS", $"GPU 3D: {gpu3d:0.#}%; FPS nguồn: {fps:0.#}.", nowUtc);
+                "GPU 3D tải cao kèm giảm FPS game", $"GPU 3D: {gpu3d:0.#}%; FPS game: {fps:0.#}.",
+                "GPU 3D quá tải kèm giảm FPS game", $"GPU 3D: {gpu3d:0.#}%; FPS game: {fps:0.#}.", nowUtc);
         }
 
         if (sample.GpuEncodePercent is double encode && sample.EncoderStarvationPercent is double starvation)
