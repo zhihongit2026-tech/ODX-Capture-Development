@@ -571,7 +571,7 @@
                 </StackPanel>
 
                 <Grid Grid.Row="1" Height="215" ClipToBounds="True">
-                    <Image Source="/Odx.App;component/dashboard-sidebar-art.jpg"
+                    <Image Source="pack://application:,,,/dashboard-sidebar-art.jpg"
                            Stretch="UniformToFill" Opacity="0.78" />
                     <Rectangle>
                         <Rectangle.Fill>
@@ -631,7 +631,7 @@
                                 <Border Grid.Column="1" Background="#061827" BorderBrush="#143E56"
                                         BorderThickness="0,0,0,0" Padding="28,10,15,10">
                                     <Grid>
-                                        <Image Source="/Odx.App;component/dashboard-sidebar-art.jpg"
+                                        <Image Source="pack://application:,,,/dashboard-sidebar-art.jpg"
                                                HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                                Width="270" Stretch="UniformToFill" Opacity="0.16" />
                                         <Rectangle>
