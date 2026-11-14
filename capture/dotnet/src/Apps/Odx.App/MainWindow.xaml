@@ -31,8 +31,8 @@
         </Style>
 
         <Style TargetType="{x:Type TextBox}">
-            <Setter Property="Height" Value="42" />
-            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Padding" Value="11,6" />
             <Setter Property="Margin" Value="0,3" />
             <Setter Property="Foreground" Value="#F1FAFF" />
             <Setter Property="Background" Value="#061827" />
@@ -125,7 +125,7 @@
         <Style TargetType="{x:Type ComboBox}">
             <Setter Property="Height" Value="42" />
             <Setter Property="Margin" Value="0,3" />
-            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Padding" Value="11,6" />
             <Setter Property="Foreground" Value="#F0FAFF" />
             <Setter Property="Background" Value="#0B2A40" />
             <Setter Property="BorderBrush" Value="#39718B" />
@@ -659,7 +659,7 @@
                     </Grid.ColumnDefinitions>
 
                     <Border x:Name="CaptureCard" Grid.Column="0" Style="{StaticResource CardBorder}"
-                            Padding="30,20,25,20" Margin="0,0,8,0" MinHeight="214">
+                            Padding="30,16,25,16" Margin="0,0,8,0" MinHeight="214">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,15">
                                 <TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets"
@@ -734,7 +734,7 @@
                     </Border>
 
                     <Border x:Name="SettingsCard" Grid.Column="1" Style="{StaticResource CardBorder}"
-                            Padding="30,20,28,20" Margin="8,0,0,0" MinHeight="214">
+                            Padding="30,16,28,16" Margin="8,0,0,0" MinHeight="214">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,15">
                                 <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets"
@@ -774,12 +774,12 @@
 
                 <!-- Party / room control -->
                 <Border x:Name="PartyCard" Grid.Row="2" Style="{StaticResource CardBorder}"
-                        Padding="30,19,28,20" MinHeight="188">
+                        Padding="30,16,28,16" MinHeight="188">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="45" />
-                            <RowDefinition Height="58" />
-                            <RowDefinition Height="58" />
+                            <RowDefinition Height="52" />
+                            <RowDefinition Height="52" />
                         </Grid.RowDefinitions>
                         <DockPanel Grid.Row="0" Margin="8,0,0,8">
                             <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets"
