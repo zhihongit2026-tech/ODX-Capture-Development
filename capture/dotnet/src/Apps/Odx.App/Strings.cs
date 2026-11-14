@@ -26,6 +26,17 @@ public sealed class Strings
 
     public static Strings For(string? code) => code == Vietnamese ? Vi : En;
 
+    public required string Workspace { get; init; }
+    public required string NavOverview { get; init; }
+    public required string NavCapture { get; init; }
+    public required string NavParty { get; init; }
+    public required string NavSettings { get; init; }
+    public required string DashboardTitle { get; init; }
+    public required string CaptureTitle { get; init; }
+    public required string SettingsTitle { get; init; }
+    public required string PartyTitle { get; init; }
+    public required string HotkeyHelp { get; init; }
+    public required string AiGuardHelp { get; init; }
     public required string Language { get; init; }
     public required string Source { get; init; }
     public required string GameProfile { get; init; }
@@ -153,6 +164,17 @@ public sealed class Strings
 
     public static readonly Strings En = new()
     {
+        Workspace = "WORKSPACE",
+        NavOverview = "Overview",
+        NavCapture = "Capture",
+        NavParty = "Party / Room",
+        NavSettings = "Settings",
+        DashboardTitle = "DASHBOARD / SESSION CONTROL",
+        CaptureTitle = "CAPTURE",
+        SettingsTitle = "PREFERENCES",
+        PartyTitle = "PARTY / ROOM",
+        HotkeyHelp = "Select the field and press a new key combination.",
+        AiGuardHelp = "AI Guard runs in its independent click-through overlay during supported recording sessions.",
         Language = "Language",
         Source = "Source",
         GameProfile = "Game profile",
@@ -306,6 +328,17 @@ public sealed class Strings
 
     public static readonly Strings Vi = new()
     {
+        Workspace = "KHÔNG GIAN LÀM VIỆC",
+        NavOverview = "Tổng quan",
+        NavCapture = "Ghi hình",
+        NavParty = "Party / Room",
+        NavSettings = "Cấu hình",
+        DashboardTitle = "DASHBOARD / ĐIỀU KHIỂN PHIÊN",
+        CaptureTitle = "GHI HÌNH / CAPTURE",
+        SettingsTitle = "CẤU HÌNH / PREFERENCES",
+        PartyTitle = "PARTY / ROOM",
+        HotkeyHelp = "Có thể đổi phím tắt bằng cách chọn ô và nhấn tổ hợp phím mới.",
+        AiGuardHelp = "AI Guard hiển thị dưới dạng lớp phủ độc lập, không nhận thao tác chuột, trong các phiên ghi hình được hỗ trợ.",
         Language = "Ngôn ngữ",
         Source = "Nguồn quay",
         GameProfile = "Hồ sơ game",
