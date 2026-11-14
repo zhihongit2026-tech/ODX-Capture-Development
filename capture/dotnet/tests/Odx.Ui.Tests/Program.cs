@@ -14,6 +14,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Microsoft.Data.Sqlite;
 using Odx.Orchestrator;
 
 internal static class Program
@@ -22,6 +23,7 @@ internal static class Program
     private static readonly string[] Navigation = ["NavDashboard", "NavCapture", "NavParty", "NavSettings"];
     private static readonly string[] Anchors = ["StartStopButton", "SourceBox", "PlayerBox", "LanguageBox"];
     private static readonly List<object> Checks = [];
+    private static readonly List<string> CleanupErrors = [];
     private static string _output = "";
 
     [STAThread]
@@ -49,6 +51,7 @@ internal static class Program
             File.WriteAllText(settings, "{\"Language\":\"vi\",\"PlayerId\":\"uiqa\",\"PlayerName\":\"Nguyễn Thị Ánh\",\"RecordAudio\":false}");
             var host = OrchestratorHost.Build(new OrchestratorOptions(Path.Combine(package, "bin", "games", "example-fps.json"), 0, 0)
             { StatePath = Path.Combine(temporary, "rooms.db"), TimeServer = "127.0.0.1:9" }, "127.0.0.1");
+            Exception? testFailure = null;
             try
             {
                 host.StartAsync().GetAwaiter().GetResult();
@@ -77,36 +80,59 @@ internal static class Program
                     }
                 }
                 Require(Hash(exe) == exeHash, "Packaged executable changed during testing.");
-                SaveReport("passed", new { packagedExecutableSha256 = exeHash });
-                return 0;
+            }
+            catch (Exception error)
+            {
+                testFailure = error;
+                Console.Error.WriteLine("UI verification failed before cleanup: " + error);
+                SaveFailure(error);
+                throw;
             }
             finally
             {
-                host.StopAsync().GetAwaiter().GetResult();
-                host.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                File.WriteAllBytes(config, originalConfig);
-                File.Delete(settings);
-                if (!Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(settings)!).Any()) Directory.Delete(Path.GetDirectoryName(settings)!);
-                Directory.Delete(temporary, true);
+                Cleanup("stop local orchestrator", () => host.StopAsync().GetAwaiter().GetResult());
+                Cleanup("dispose local orchestrator", () => host.DisposeAsync().AsTask().GetAwaiter().GetResult());
+                // Disposed Microsoft.Data.Sqlite connections can remain in the pool and keep the test database locked.
+                Cleanup("clear test SQLite pools", SqliteConnection.ClearAllPools);
+                Cleanup("restore extracted test configuration", () => File.WriteAllBytes(config, originalConfig));
+                Cleanup("remove test settings", () =>
+                {
+                    File.Delete(settings);
+                    if (!Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(settings)!).Any()) Directory.Delete(Path.GetDirectoryName(settings)!);
+                });
+                Cleanup("remove temporary test files", () => Directory.Delete(temporary, true));
+                if (testFailure is null && CleanupErrors.Count > 0)
+                    throw new InvalidOperationException("UI tests completed but cleanup failed: " + string.Join("; ", CleanupErrors));
             }
+            SaveReport("passed", new { packagedExecutableSha256 = exeHash });
+            return 0;
         }
         catch (Exception error)
         {
             Console.Error.WriteLine(error);
-            if (_output.Length > 0) SaveReport("failed", new { error = error.ToString() });
+            SaveFailure(error);
             return 1;
         }
     }
 
     private static void PackagedSmoke(string exe, bool configured, int launch, string server)
     {
-        using var process = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! })!;
         string id = $"packaged-{(configured ? "configured" : "standalone")}-{launch:00}";
+        string stage = "startup";
+        IntPtr handle = IntPtr.Zero;
+        var output = new StringBuilder();
+        using var process = new Process { StartInfo = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)!, RedirectStandardOutput = true, RedirectStandardError = true } };
+        void CaptureOutput(object? sender, DataReceivedEventArgs line) { if (line.Data is not null) lock (output) output.AppendLine(line.Data); }
+        process.OutputDataReceived += CaptureOutput;
+        process.ErrorDataReceived += CaptureOutput;
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
         try
         {
-            Wait(() => { process.Refresh(); return !process.HasExited && process.MainWindowHandle != IntPtr.Zero; }, "Packaged app did not open its window.", 20000);
-            IntPtr handle = process.MainWindowHandle;
-            var window = AutomationElement.FromHandle(handle);
+            var dashboard = WaitForDashboard(process, id);
+            handle = dashboard.Handle;
+            var window = dashboard.Window;
             Wait(() => Shown(window, Anchors[0]), "Overview did not become visible.");
             AssertPage(window, 0);
             Require(Shown(window, Navigation[2]) == configured, "Party navigation availability differs from configuration.");
@@ -114,6 +140,7 @@ internal static class Program
                 for (int page = 0; page < Pages.Length; page++)
                 {
                     if (page == 2 && !configured) continue;
+                    stage = $"navigate {Pages[page]}, repeat {repeat + 1}";
                     Navigate(window, page);
                     if (launch == 1 && repeat == 0) Screenshot(handle, Path.Combine(_output, $"{id}-{Pages[page]}.png"));
                 }
@@ -124,6 +151,7 @@ internal static class Program
                     Navigate(window, 2);
                     for (int room = 0; room < 3; room++)
                     {
+                        stage = $"open local room {room + 1}";
                         Invoke(window, "CreateButton");
                         Wait(() => Shown(window, "RoomBox") && Value(window, "RoomBox").Length > 0, "Real loopback room did not open.", 15000);
                         string roomCode = Value(window, "RoomBox");
@@ -134,23 +162,29 @@ internal static class Program
                         string readyText = member.GetProperty("ready").GetBoolean() ? Odx.App.Strings.Vi.PartyReady : Odx.App.Strings.Vi.PartyNotReady;
                         for (int visit = 0; visit < 5; visit++)
                         {
+                            stage = $"verify local room {room + 1} roster, visit {visit + 1}";
                             Navigate(window, 0);
                             Wait(() => NamedTextShown(window, memberName) && NamedTextShown(window, readyText), "Party roster does not match the real room member and readiness.");
                             Navigate(window, 2);
                             Require(Shown(window, "RoomBox"), "Connected room disappeared while changing pages.");
                         }
                         Screenshot(handle, Path.Combine(_output, $"{id}-connected-room-{room}.png"));
+                        stage = $"close local room {room + 1}";
                         Invoke(window, "CreateButton");
                         Wait(() => !Shown(window, "RoomBox"), "Loopback room did not close.");
                     }
                 }
+                stage = "minimize and second-instance restore";
                 Navigate(window, 0);
                 Invoke(window, "MinimizeButton");
                 Wait(() => !IsWindowVisible(handle), "Minimize did not preserve the tray lifecycle.");
                 using (var restore = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false })!)
                     Require(restore.WaitForExit(10000), "Second-instance restore did not exit.");
                 Wait(() => IsWindowVisible(handle), "Second launch did not restore the existing window.");
-                window = AutomationElement.FromHandle(handle);
+                dashboard = WaitForDashboard(process, id);
+                handle = dashboard.Handle;
+                window = dashboard.Window;
+                stage = "resize, maximize and restore";
                 var pattern = (WindowPattern)window.GetCurrentPattern(WindowPattern.Pattern);
                 pattern.SetWindowVisualState(WindowVisualState.Normal);
                 var transform = (TransformPattern)window.GetCurrentPattern(TransformPattern.Pattern);
@@ -166,15 +200,89 @@ internal static class Program
                 Wait(() => pattern.Current.WindowVisualState == WindowVisualState.Normal, "Restore failed.");
             }
             uint dpi = GetDpiForWindow(handle);
+            stage = "close packaged application";
             Invoke(window, "CloseButton");
             Require(process.WaitForExit(10000), "Packaged app did not close.");
             Require(process.ExitCode == 0, "Packaged app exited with " + process.ExitCode);
             Record(id, new { actualPackagedProcess = true, processId = process.Id, dpi, configured });
         }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"{id} failed during {stage}: {error}");
+            try
+            {
+                process.Refresh();
+                string capturedOutput;
+                lock (output) capturedOutput = output.ToString();
+                File.WriteAllText(Path.Combine(_output, id + "-process.log"), capturedOutput);
+                object[] windows = WindowDiagnostics(process.Id, out IntPtr fallbackHandle);
+                IntPtr screenshotHandle = handle != IntPtr.Zero && IsWindowVisible(handle) ? handle : fallbackHandle;
+                File.WriteAllText(Path.Combine(_output, id + "-failure.json"), JsonSerializer.Serialize(new
+                {
+                    name = id, stage, processId = process.Id, exited = process.HasExited,
+                    exitCode = process.HasExited ? (int?)process.ExitCode : null,
+                    windowHandle = $"0x{handle.ToInt64():X}", screenshotWindowHandle = $"0x{screenshotHandle.ToInt64():X}", windows,
+                    error = error.ToString(), processOutput = capturedOutput
+                }, new JsonSerializerOptions { WriteIndented = true }));
+                if (screenshotHandle != IntPtr.Zero) Screenshot(screenshotHandle, Path.Combine(_output, id + "-failure.png"));
+            }
+            catch (Exception diagnosticError) { Console.Error.WriteLine("Failure diagnostics: " + diagnosticError); }
+            throw new InvalidOperationException($"{id} failed during {stage}: {error.Message}", error);
+        }
         finally
         {
-            if (!process.HasExited) { process.Kill(true); process.WaitForExit(10000); }
+            Cleanup("terminate " + id, () => { if (!process.HasExited) { process.Kill(true); Require(process.WaitForExit(10000), "Packaged process remained alive after termination."); } });
         }
+    }
+
+    private static (IntPtr Handle, AutomationElement Window) WaitForDashboard(Process process, string name)
+    {
+        AutomationElement? window = null;
+        IntPtr handle = IntPtr.Zero;
+        Wait(() =>
+        {
+            process.Refresh();
+            if (process.HasExited) throw new InvalidOperationException($"{name}: process {process.Id} exited with {process.ExitCode} before its dashboard appeared.");
+            // The generated WPF splash can be this process's first main HWND; identify the actual dashboard by its control.
+            foreach (AutomationElement candidate in ProcessWindows(process.Id))
+            {
+                if (Find(candidate, "StartStopButton") is null) continue;
+                window = candidate;
+                handle = new IntPtr(candidate.Current.NativeWindowHandle);
+                return handle != IntPtr.Zero;
+            }
+            return false;
+        }, name + ": no dashboard window containing StartStopButton appeared.", 20000);
+        return (handle, window ?? throw new InvalidOperationException("Dashboard UI Automation element was not resolved."));
+    }
+
+    private static IEnumerable<AutomationElement> ProcessWindows(int processId) => AutomationElement.RootElement.FindAll(
+        TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, processId)).Cast<AutomationElement>();
+
+    private static object[] WindowDiagnostics(int processId, out IntPtr visibleHandle)
+    {
+        visibleHandle = IntPtr.Zero;
+        var windows = new List<object>();
+        try
+        {
+            foreach (var window in ProcessWindows(processId))
+                try
+                {
+                    var current = window.Current;
+                    var handle = new IntPtr(current.NativeWindowHandle);
+                    if (visibleHandle == IntPtr.Zero && handle != IntPtr.Zero && IsWindowVisible(handle)) visibleHandle = handle;
+                    var controls = Navigation.Concat(Anchors).Concat(new[] { "CloseButton", "MinimizeButton", "MaximizeButton", "CreateButton", "RoomBox" })
+                        .ToDictionary(id => id, id =>
+                        {
+                            var element = Find(window, id);
+                            return new { present = element is not null, offscreen = element is null ? (bool?)null : element.Current.IsOffscreen };
+                        });
+                    windows.Add(new { name = current.Name, className = current.ClassName, handle = $"0x{handle.ToInt64():X}", offscreen = current.IsOffscreen, controls });
+                }
+                catch (Exception error) { windows.Add(new { diagnosticError = error.ToString() }); }
+        }
+        catch (Exception error) { windows.Add(new { diagnosticError = error.ToString() }); }
+        return windows.ToArray();
     }
 
     private static int LayoutWorker(string[] args)
@@ -348,10 +456,26 @@ internal static class Program
     private static string Hash(string file) { using var stream = File.OpenRead(file); return Convert.ToHexString(SHA256.HashData(stream)); }
     private static string Option(string[] args, string key) => Array.IndexOf(args, key) is int index && index >= 0 && index + 1 < args.Length ? args[index + 1] : throw new ArgumentException("Missing " + key);
     private static void Require(bool valid, string message) { if (!valid) throw new InvalidOperationException(message); }
+    private static void Cleanup(string name, Action cleanup)
+    {
+        try { cleanup(); }
+        catch (Exception error)
+        {
+            string message = name + ": " + error;
+            CleanupErrors.Add(message);
+            Console.Error.WriteLine("Cleanup failure: " + message);
+        }
+    }
     private static void Record(string name, object detail) { Checks.Add(new { name, status = "passed", detail }); Console.WriteLine("PASS " + name); SaveReport("running", null); }
+    private static void SaveFailure(Exception error)
+    {
+        if (_output.Length == 0) return;
+        try { SaveReport("failed", new { error = error.ToString() }); }
+        catch (Exception reportError) { Console.Error.WriteLine("Could not save failure report: " + reportError); }
+    }
     private static void SaveReport(string status, object? detail) => File.WriteAllText(Path.Combine(_output, "summary.json"), JsonSerializer.Serialize(new
     {
-        status, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.OSArchitecture.ToString(), checks = Checks, detail,
+        status, os = RuntimeInformation.OSDescription, architecture = RuntimeInformation.OSArchitecture.ToString(), checks = Checks, detail, cleanupErrors = CleanupErrors,
         limitations = new[] { "Packaged UI automation runs on this hosted Windows runner only; Windows 10/11 acceptance remains separate.", "100/125/150/175% cases simulate WPF viewport and raster scaling; they do not change Windows Display Scaling or exercise monitor transitions.", "Room tests use a real local orchestrator and a test identity; no live Arma 3, recording, multiplayer hardware or capture-exclusion acceptance is claimed." }
     }, new JsonSerializerOptions { WriteIndented = true }));
     [StructLayout(LayoutKind.Sequential)] private struct Rectangle { public int Left, Top, Right, Bottom; }
