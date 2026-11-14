@@ -15,6 +15,7 @@
   <ItemGroup>
     <Resource Include="odx.ico" />
     <Resource Include="dashboard-sidebar-art.jpg" />
+    <Resource Include="dashboard-hero-art.jpg" />
     <!-- Shown by WPF as soon as the runtime starts, before the main window is built; fades out when it appears. -->
     <SplashScreen Include="splash.png" />
   </ItemGroup>
