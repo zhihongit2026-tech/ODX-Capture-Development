@@ -703,7 +703,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
             recorded.TrySetResult(JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!);
 
         await host.ToggleRoundAsync(0, default);
-        await Task.WhenAll(new[] { hostStarted }.Concat(members.Select(m => m.Started))).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(new[] { hostStarted.Task }.Concat(members.Select(m => m.Started.Task))).WaitAsync(TimeSpan.FromSeconds(10));
 
         string? sessionId = null;
         for (int i = 0; i < 100; i++)
