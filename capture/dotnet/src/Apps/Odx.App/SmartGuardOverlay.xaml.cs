@@ -58,7 +58,10 @@ public partial class SmartGuardOverlay : Window
 
     public void UpdateAlerts(IReadOnlyList<QualityAlert> alerts)
     {
-        AlertList.ItemsSource = alerts.Select(a => new GuardAlertView(
+        AlertList.ItemsSource = alerts
+            .OrderByDescending(a => a.Severity)
+            .ThenBy(a => a.Title, StringComparer.Ordinal)
+            .Select(a => new GuardAlertView(
             (a.Severity == QualityAlertSeverity.Critical ? "CRITICAL · " :
              a.Severity == QualityAlertSeverity.Warning ? "WARNING · " : "") + a.Title,
             a.Detail,
