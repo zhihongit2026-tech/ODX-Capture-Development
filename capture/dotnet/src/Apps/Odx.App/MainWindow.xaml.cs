@@ -843,7 +843,7 @@ public partial class MainWindow : Window
             long frames = frameStatus.Frames;
             local = local.Append(new QualityAlert("ODX_VIDEO_FRAMES", QualityAlertSeverity.Info,
                 $"FRAMES {frames:N0} / {PartyRoundRequirements.MinimumVideoFrames:N0}",
-                frames >= PartyRoundRequirements.MinimumVideoFrames ? "PASS" : "CHƯA ĐẠT"));
+                frames >= PartyRoundRequirements.MinimumVideoFrames ? "ĐỦ NGƯỠNG LIVE" : "ĐANG GHI"));
         }
         return local.ToArray();
     }
