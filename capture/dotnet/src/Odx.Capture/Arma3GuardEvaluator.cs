@@ -11,6 +11,10 @@ public sealed record Arma3GuardUpdate(IReadOnlyList<QualityAlert> Alerts, Arma3G
 /// </summary>
 public sealed class Arma3GuardEvaluator
 {
+    /// <summary>Mandatory immediate stop conditions in a standalone recording (no Party host).</summary>
+    public static bool StopsStandaloneCapture(string code) =>
+        code is "ARMA3_COMMAND_MENU" or "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED";
+
     private static readonly TimeSpan AlertHold = TimeSpan.FromSeconds(5);
     private readonly Dictionary<string, QualityAlert> _alerts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTime> _clearAfter = new(StringComparer.Ordinal);
