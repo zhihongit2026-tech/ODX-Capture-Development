@@ -39,6 +39,7 @@ public sealed record LanState(string NetworkId, string Status, string? Address =
 public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICaptureRun> startCapture)
 {
     private static readonly TimeSpan Retry = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PartyAlertRefreshInterval = TimeSpan.FromSeconds(3);
     public const string FocusLostProblemPrefix = "ODX_FOCUS_LOST|";
     public const string GuardStopProblemPrefix = "ODX_GUARD_STOP|";
     public static string FocusLostProblem(string sessionId) => FocusLostProblemPrefix + sessionId;
@@ -490,7 +491,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
     /// <summary>
     /// Publishes this member's current warning set using the existing Protocol 5 AgentState. The unchanged
-    /// Orchestrator broadcasts it in RoomUpdate; peers can display the member's warnings within five seconds.
+    /// Orchestrator broadcasts it in RoomUpdate; unchanged warning sets are refreshed every three seconds.
     /// </summary>
     public async Task<bool> ReportAlertsAsync(string sessionId, IReadOnlyList<QualityAlert> alerts, CancellationToken stop)
     {
@@ -509,7 +510,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
             if (_partyAlertsSessionId == sessionId &&
                 string.Equals(_lastSentPartyAlertsProblem, problem, StringComparison.Ordinal) &&
-                (problem is null || DateTime.UtcNow - _lastPartyAlertsSentAtUtc < TimeSpan.FromSeconds(4)))
+                (problem is null || DateTime.UtcNow - _lastPartyAlertsSentAtUtc < PartyAlertRefreshInterval))
                 return true;
 
             _partyAlertsSessionId = sessionId;
