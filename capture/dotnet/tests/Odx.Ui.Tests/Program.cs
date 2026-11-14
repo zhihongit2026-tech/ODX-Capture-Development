@@ -425,10 +425,14 @@ internal static class Program
                 if (block.TextWrapping != TextWrapping.NoWrap) formatted.MaxTextWidth = width;
                 var drawing = VisualTreeHelper.GetDrawing(block);
                 var ink = GlyphInk(drawing);
+                Rect? ownClip = VisualTreeHelper.GetClip(block)?.Bounds;
+                Rect viewport = InkViewport(block, ownClip);
                 textMetrics.Add(new { name = block.Name, text = block.Text, block.ActualWidth, block.ActualHeight, block.DesiredSize,
+                    requestedHeight = double.IsNaN(block.Height) ? (double?)null : block.Height,
+                    hasOwnClip = ownClip.HasValue, ownClip = ownClip.HasValue ? InkDetails(ownClip.Value) : null, viewport = InkDetails(viewport),
                     wrapping = block.TextWrapping.ToString(), formattingMode = TextOptions.GetTextFormattingMode(block).ToString(),
                     ink = InkDetails(ink.Bounds), ink.Runs, reflowWidth = width, formatted.Width, formatted.Height });
-                string dimensions = $"actual={block.ActualWidth:F2}x{block.ActualHeight:F2}, ink={ink.Bounds}, reflowWidth={width:F2}, reflowHeight={formatted.Height:F2} DIP";
+                string dimensions = $"requestedHeight={block.Height}, actual={block.ActualWidth:F2}x{block.ActualHeight:F2}, ownClip={ownClip}, viewport={viewport}, ink={ink.Bounds}, reflowWidth={width:F2}, reflowHeight={formatted.Height:F2} DIP";
                 Require(block.FontFamily.Source.StartsWith("Segoe UI", StringComparison.Ordinal), "Text is missing shared typography: " + block.Name);
                 Require(!block.Text.Contains('\uFFFD'), $"Replacement character in {block.Name}: {block.Text}");
                 if (block.TextTrimming == TextTrimming.None)
@@ -439,7 +443,7 @@ internal static class Program
                         Require(formatted.Height <= block.ActualHeight + 2, $"Vertical text clipping: {name}/{block.Name}: {dimensions}");
                     }
                     // TextBlock preserves measured line breaks across rounding/shaping; reflowing at ActualWidth does not.
-                    else Require(ink.Runs > 0 && InkFits(block, ink.Bounds), $"Wrapped glyph clipping: {name}/{block.Name}: {dimensions}");
+                    Require(ink.Runs > 0 && InkFits(ink.Bounds, viewport), $"Glyph clipping: {name}/{block.Name}: {dimensions}");
                 }
                 if (drawing is not null)
                     foreach (GlyphRunDrawing glyph in Glyphs(drawing))
@@ -505,9 +509,14 @@ internal static class Program
                 using (var file = File.Create(Path.Combine(output, $"{id}-ink-control-{(clipped ? "clipped" : "normal")}.png")))
                 { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(file); }
                 var ink = GlyphInk(VisualTreeHelper.GetDrawing(block));
-                bool fits = InkFits(block, ink.Bounds);
-                bool verticalOverflow = !ink.Bounds.IsEmpty && (ink.Bounds.Top < -2 || ink.Bounds.Bottom > block.ActualHeight + 2);
-                controls.Add(new { clipped, expectedFits = !clipped, actualFits = fits, verticalOverflow, block.ActualWidth, block.ActualHeight, ink = InkDetails(ink.Bounds), ink.Runs });
+                Rect? ownClip = VisualTreeHelper.GetClip(block)?.Bounds;
+                Rect viewport = InkViewport(block, ownClip);
+                bool fits = InkFits(ink.Bounds, viewport);
+                bool verticalOverflow = !ink.Bounds.IsEmpty && !viewport.IsEmpty && (ink.Bounds.Top < viewport.Top - 2 || ink.Bounds.Bottom > viewport.Bottom + 2);
+                controls.Add(new { clipped, expectedFits = !clipped, actualFits = fits, verticalOverflow, block.ActualWidth, block.ActualHeight,
+                    requestedHeight = double.IsNaN(block.Height) ? (double?)null : block.Height,
+                    hasOwnClip = ownClip.HasValue, ownClip = ownClip.HasValue ? InkDetails(ownClip.Value) : null,
+                    viewport = InkDetails(viewport), ink = InkDetails(ink.Bounds), ink.Runs });
                 Require(ink.Runs > 0 && !ink.Bounds.IsEmpty, "Ink control did not render real glyphs.");
                 Require(fits != clipped, clipped ? "Ink audit did not reject the clipped negative control." : "Ink audit rejected the centered normal control.");
                 Require(!clipped || verticalOverflow, "Negative control did not produce vertical glyph clipping.");
@@ -521,8 +530,16 @@ internal static class Program
         }
     }
 
-    private static bool InkFits(TextBlock block, Rect ink) => !ink.IsEmpty && ink.Left >= -2 && ink.Top >= -2
-        && ink.Right <= block.ActualWidth + 2 && ink.Bottom <= block.ActualHeight + 2;
+    private static Rect InkViewport(TextBlock block, Rect? ownClip)
+    {
+        var viewport = new Rect(0, 0, block.ActualWidth, block.ActualHeight);
+        // WPF can retain the natural RenderSize while applying a smaller local layout clip.
+        if (ownClip.HasValue) viewport.Intersect(ownClip.Value);
+        return viewport;
+    }
+    private static bool InkFits(Rect ink, Rect viewport) => !ink.IsEmpty && !viewport.IsEmpty
+        && ink.Left >= viewport.Left - 2 && ink.Top >= viewport.Top - 2
+        && ink.Right <= viewport.Right + 2 && ink.Bottom <= viewport.Bottom + 2;
     private static object? InkDetails(Rect ink) => ink.IsEmpty ? null : new { ink.X, ink.Y, ink.Width, ink.Height };
     private static (Rect Bounds, int Runs) GlyphInk(Drawing? drawing)
     {
