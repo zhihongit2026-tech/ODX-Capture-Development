@@ -13,6 +13,8 @@ to run outside GitHub Actions, alongside an existing `odx-app` process, or when
 the runner already has `%APPDATA%/Odx/odx-app.json`. Its Vietnamese test settings
 are removed afterward. Only the extracted test copy's deployment configuration
 is changed and restored; the distribution ZIP and executable remain unchanged.
+Packaged launches and layout workers report their own results and continue after
+another case fails. Any failed case or cleanup still makes the overall run fail.
 
 ## Executed checks
 
@@ -33,6 +35,9 @@ is changed and restored; the distribution ZIP and executable remain unchanged.
   check the four page grids' visibility, Vietnamese glyph rendering and text
   bounds. Render all available pages at 100%, 125%, 150% and 175%, with the
   corresponding logical viewport for a 1920×1080 display.
+- Show the conditional OBS connection rows in layout workers by enabling OBS
+  only in the harness-owned test settings. Restore the exact settings bytes after
+  each worker, including failures/timeouts. No OBS connection or recording starts.
 - Audit the same shared family and actual rendered glyphs in JoinRoomDialog,
   ToastOverlay, SmartGuardOverlay and CountdownOverlay content. The overlay
   content is rendered separately without starting capture or overlay timers.
@@ -44,6 +49,9 @@ is changed and restored; the distribution ZIP and executable remain unchanged.
 `summary.json` records packaged runs and the actual hosted OS. Each layout case
 has its own JSON and PNG files. Layout workers use the application built from
 the same checkout; they are distinct from the packaged executable smoke test.
+The harness links the application's original icon and two dashboard image files
+as WPF resources so its entry assembly resolves the application's absolute pack
+URIs. Application XAML and typography still load from the actual app assembly.
 
 The four scale cases simulate WPF logical layout and bitmap resolution. They do
 **not** change Windows Display Scaling, exercise per-monitor DPI transitions, or

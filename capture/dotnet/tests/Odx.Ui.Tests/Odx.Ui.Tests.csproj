@@ -14,4 +14,10 @@
     <ProjectReference Include="../../src/Apps/Odx.App/Odx.App.csproj" />
     <ProjectReference Include="../../src/Apps/Odx.Orchestrator/Odx.Orchestrator.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Absolute application pack URIs resolve against this harness's entry assembly in layout workers. -->
+    <Resource Include="../../src/Apps/Odx.App/odx.ico" Link="odx.ico" />
+    <Resource Include="../../src/Apps/Odx.App/dashboard-sidebar-art.jpg" Link="dashboard-sidebar-art.jpg" />
+    <Resource Include="../../src/Apps/Odx.App/dashboard-hero-art.jpg" Link="dashboard-hero-art.jpg" />
+  </ItemGroup>
 </Project>

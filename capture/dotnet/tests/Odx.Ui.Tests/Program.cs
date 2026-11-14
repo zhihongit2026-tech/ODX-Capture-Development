@@ -23,6 +23,7 @@ internal static class Program
     private static readonly string[] Navigation = ["NavDashboard", "NavCapture", "NavParty", "NavSettings"];
     private static readonly string[] Anchors = ["StartStopButton", "SourceBox", "PlayerBox", "LanguageBox"];
     private static readonly List<object> Checks = [];
+    private static readonly List<Exception> CaseFailures = [];
     private static readonly List<string> CleanupErrors = [];
     private static string _output = "";
 
@@ -60,26 +61,39 @@ internal static class Program
                 {
                     File.WriteAllText(config, JsonSerializer.Serialize(new { orchestrator = configured ? server : null }));
                     for (int launch = 1; launch <= 10; launch++)
-                        PackagedSmoke(exe, configured, launch, server);
+                        RunCase($"packaged-{(configured ? "configured" : "standalone")}-{launch:00}", () => PackagedSmoke(exe, configured, launch, server));
                     foreach (int percent in new[] { 100, 125, 150, 175 })
                     {
-                        string worker = Path.Combine(temporary, $"layout-{configured}-{percent}");
-                        CopyDirectory(AppContext.BaseDirectory, worker);
-                        File.WriteAllText(Path.Combine(worker, "odx-capture.json"), JsonSerializer.Serialize(new { orchestrator = configured ? server : null }));
-                        var start = new ProcessStartInfo(Path.Combine(worker, "Odx.Ui.Tests.exe")) { UseShellExecute = false };
-                        foreach (string arg in new[] { "--layout-worker", "--output", _output, "--percent", percent.ToString(CultureInfo.InvariantCulture), "--configured", configured.ToString() }) start.ArgumentList.Add(arg);
-                        using var process = Process.Start(start)!;
-                        if (!process.WaitForExit(45000))
+                        RunCase($"layout-{configured}-{percent}", () =>
                         {
-                            process.Kill(true);
-                            process.WaitForExit(10000);
-                            throw new TimeoutException("Layout worker timed out.");
-                        }
-                        Require(process.ExitCode == 0, $"Layout worker {configured}/{percent}% failed; inspect its JSON.");
-                        Record($"layout-{configured}-{percent}", new { simulatedScalePercent = percent });
+                            byte[] savedSettings = File.ReadAllBytes(settings);
+                            try
+                            {
+                                var layoutSettings = JsonSerializer.Deserialize<Odx.App.AppSettings>(savedSettings)
+                                    ?? throw new InvalidOperationException("Missing layout test settings.");
+                                layoutSettings.RecordWithObs = true;
+                                File.WriteAllText(settings, JsonSerializer.Serialize(layoutSettings));
+                                string worker = Path.Combine(temporary, $"layout-{configured}-{percent}");
+                                CopyDirectory(AppContext.BaseDirectory, worker);
+                                File.WriteAllText(Path.Combine(worker, "odx-capture.json"), JsonSerializer.Serialize(new { orchestrator = configured ? server : null }));
+                                var start = new ProcessStartInfo(Path.Combine(worker, "Odx.Ui.Tests.exe")) { UseShellExecute = false };
+                                foreach (string arg in new[] { "--layout-worker", "--output", _output, "--percent", percent.ToString(CultureInfo.InvariantCulture), "--configured", configured.ToString() }) start.ArgumentList.Add(arg);
+                                using var process = Process.Start(start)!;
+                                if (!process.WaitForExit(45000))
+                                {
+                                    process.Kill(true);
+                                    Require(process.WaitForExit(10000), "Layout worker remained alive after termination.");
+                                    throw new TimeoutException("Layout worker timed out.");
+                                }
+                                Require(process.ExitCode == 0, $"Layout worker {configured}/{percent}% failed; inspect its JSON.");
+                                Record($"layout-{configured}-{percent}", new { simulatedScalePercent = percent, obsLayoutEnabled = true });
+                            }
+                            finally { Cleanup("restore layout test settings", () => File.WriteAllBytes(settings, savedSettings)); }
+                        });
                     }
                 }
                 Require(Hash(exe) == exeHash, "Packaged executable changed during testing.");
+                if (CaseFailures.Count > 0) throw new AggregateException("UI verification failed in " + CaseFailures.Count + " case(s).", CaseFailures);
             }
             catch (Exception error)
             {
@@ -293,12 +307,13 @@ internal static class Program
         string id = $"layout-{configured}-{percent}";
         var evidence = new List<object>();
         string? failure = null;
-        Application.ResourceAssembly = typeof(Odx.App.App).Assembly;
-        var application = new Odx.App.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        application.InitializeComponent();
+        bool obsControlsVisible = false;
+        Odx.App.App? application = null;
         Odx.App.MainWindow? window = null;
         try
         {
+            application = new Odx.App.App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            application.InitializeComponent();
             window = new Odx.App.MainWindow { WindowState = WindowState.Normal, Width = 1920.0 / (percent / 100.0), Height = 1080.0 / (percent / 100.0) };
             window.Show();
             Pump();
@@ -311,6 +326,11 @@ internal static class Program
                 ((Button)window.FindName(Navigation[page])).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 Pump();
                 AssertVisibility(window, page);
+                if (page == 1)
+                {
+                    obsControlsVisible = ((FrameworkElement)window.FindName("ObsConnectionPanel")).IsVisible;
+                    Require(obsControlsVisible, "OBS connection controls were not shown for the typography audit.");
+                }
                 evidence.Add(AuditAndRender(window, (FrameworkElement)window.Content, output, id + "-" + Pages[page], percent, 8));
             }
             var toast = (Odx.App.ToastOverlay)Activator.CreateInstance(typeof(Odx.App.ToastOverlay), nonPublic: true)!;
@@ -335,9 +355,10 @@ internal static class Program
         catch (Exception error) { failure = error.ToString(); Console.Error.WriteLine(error); }
         finally
         {
-            window?.Close();
-            application.Shutdown();
-            File.WriteAllText(Path.Combine(output, id + ".json"), JsonSerializer.Serialize(new { status = failure is null ? "passed" : "failed", mode = "WPF layout at 1920x1080 equivalent viewport and raster scale; not an OS DPI change", evidence, failure }, new JsonSerializerOptions { WriteIndented = true }));
+            Cleanup("close layout window", () => window?.Close());
+            Cleanup("shut down layout application", () => application?.Shutdown());
+            if (failure is null && CleanupErrors.Count > 0) failure = string.Join("; ", CleanupErrors);
+            File.WriteAllText(Path.Combine(output, id + ".json"), JsonSerializer.Serialize(new { status = failure is null ? "passed" : "failed", mode = "WPF layout at 1920x1080 equivalent viewport and raster scale; not an OS DPI change", obsControlsVisible, evidence, failure }, new JsonSerializerOptions { WriteIndented = true }));
         }
         return failure is null ? 0 : 1;
     }
@@ -456,6 +477,17 @@ internal static class Program
     private static string Hash(string file) { using var stream = File.OpenRead(file); return Convert.ToHexString(SHA256.HashData(stream)); }
     private static string Option(string[] args, string key) => Array.IndexOf(args, key) is int index && index >= 0 && index + 1 < args.Length ? args[index + 1] : throw new ArgumentException("Missing " + key);
     private static void Require(bool valid, string message) { if (!valid) throw new InvalidOperationException(message); }
+    private static void RunCase(string name, Action action)
+    {
+        try { action(); }
+        catch (Exception error)
+        {
+            CaseFailures.Add(new InvalidOperationException(name + ": " + error.Message, error));
+            Checks.Add(new { name, status = "failed", detail = new { error = error.ToString() } });
+            Console.Error.WriteLine("FAIL " + name + ": " + error);
+            SaveReport("running", new { failedCases = CaseFailures.Count });
+        }
+    }
     private static void Cleanup(string name, Action cleanup)
     {
         try { cleanup(); }
