@@ -18,6 +18,8 @@ public partial class SmartGuardOverlay : Window
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
     private readonly DispatcherTimer _follow = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly DispatcherTimer _countdown = new() { Interval = TimeSpan.FromSeconds(1) };
+    private DateTime _countdownEndsAtUtc;
     private string? _processName;
     private bool _captureExcluded;
 
@@ -26,15 +28,27 @@ public partial class SmartGuardOverlay : Window
         InitializeComponent();
         Opacity = 0;
         _follow.Tick += (_, _) => FollowTarget();
+        _countdown.Tick += (_, _) => UpdateCountdown();
     }
 
-    public void Start(string? processName)
+    public void Start(string? processName, DateTime countdownEndsAtUtc)
     {
         _processName = processName;
+        _countdownEndsAtUtc = countdownEndsAtUtc;
+        UpdateCountdown();
         if (!IsLoaded) Show();
         Hide();
         _follow.Start();
+        _countdown.Start();
         FollowTarget();
+    }
+
+    private void UpdateCountdown()
+    {
+        double remaining = Math.Max(0, (_countdownEndsAtUtc - DateTime.UtcNow).TotalSeconds);
+        int seconds = (int)Math.Ceiling(remaining);
+        CountdownText.Text = $"{seconds / 60:00}:{seconds % 60:00}";
+        if (seconds == 0) _countdown.Stop();
     }
 
     public void UpdateAlerts(IReadOnlyList<QualityAlert> alerts)
@@ -82,7 +96,7 @@ public partial class SmartGuardOverlay : Window
         if (!_captureExcluded) Hide();
     }
 
-    protected override void OnClosed(EventArgs e) { _follow.Stop(); base.OnClosed(e); }
+    protected override void OnClosed(EventArgs e) { _follow.Stop(); _countdown.Stop(); base.OnClosed(e); }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
