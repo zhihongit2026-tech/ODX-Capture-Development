@@ -717,7 +717,9 @@ public partial class MainWindow : Window
                     _qualityGuard?.ResolveExternalAlert(alert.Code, _focusAlertAtUtc.Value);
                     RefreshSmartGuardOverlay();
                     SetStatus(_ => requested.Reason);
-                    if (solo && requested.Code == "ARMA3_COMMAND_MENU" &&
+                    // A standalone capture has no Host to issue a Protocol 5 round stop.
+                    // End it immediately for every mandatory game-guard stop, including ESC and camera changes.
+                    if (solo && (requested.Code is "ARMA3_COMMAND_MENU" or "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED") &&
                         (_state is RunState.Starting or RunState.Recording))
                         StopRecording();
                 }));
@@ -735,7 +737,11 @@ public partial class MainWindow : Window
     {
         IReadOnlyList<QualityAlert> gameAlerts = _run is IGameGuardCaptureRun gameGuard
             ? gameGuard.GameAlerts : Array.Empty<QualityAlert>();
-        return (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts).ToArray();
+        // Game-guard violations may also appear in QualityGuard as external alerts.
+        // Show each code once rather than duplicating ESC and camera stop warnings.
+        return (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts)
+            .GroupBy(alert => alert.Code, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(alert => alert.Severity).First()).ToArray();
     }
 
     private QualityAlert[] CurrentPartyGuardAlerts(RoomUpdate? update = null)
