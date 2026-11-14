@@ -8,8 +8,8 @@ public sealed class Arma3GuardEvaluatorTests
 {
     private static Arma3GuardSample Sample(long id, double fps = 60, double speed = 1,
         string menu = "", bool action = false, int visible = 2, int total = 2, bool alive = true,
-        string view = "INTERNAL") =>
-        new(id * 500, view, fps, new Vec3(100, 200, 5), speed, menu, action, visible, total, alive, id);
+        string view = "INTERNAL", bool esc = false) =>
+        new(id * 500, view, fps, new Vec3(100, 200, 5), speed, menu, action, visible, total, alive, id, esc);
 
     [Fact]
     public void Command_menu_is_detected_immediately_even_before_first_metric_sample()
@@ -18,7 +18,8 @@ public sealed class Arma3GuardEvaluatorTests
         var update = guard.Observe(Sample(0, menu: "RscGroupRootMenu"), DateTime.UtcNow);
 
         Assert.Contains(update.Alerts, a => a.Code == "ARMA3_COMMAND_MENU" && a.Severity == QualityAlertSeverity.Critical);
-        Assert.StartsWith("RETAKE_REQUIRED:", update.StopReason ?? string.Empty);
+        Assert.Equal("ARMA3_COMMAND_MENU", update.Stop?.Code);
+        Assert.StartsWith("RETAKE_REQUIRED:", update.Stop?.Reason ?? string.Empty);
     }
 
     [Fact]
@@ -28,28 +29,50 @@ public sealed class Arma3GuardEvaluatorTests
         var update = guard.Observe(Sample(0, action: true), DateTime.UtcNow);
 
         Assert.Contains(update.Alerts, a => a.Code == "ARMA3_COMMAND_MENU");
-        Assert.Contains("Action menu", update.StopReason ?? string.Empty);
+        Assert.Equal("ARMA3_COMMAND_MENU", update.Stop?.Code);
+        Assert.Contains("Action menu", update.Stop?.Reason ?? string.Empty);
     }
 
     [Fact]
-    public void Game_fps_warns_only_below_30_after_two_half_second_samples()
+    public void Esc_keydown_triggers_immediate_game_guard_stop()
+    {
+        var guard = new Arma3GuardEvaluator();
+        var update = guard.Observe(Sample(0, esc: true), DateTime.UtcNow);
+
+        Assert.Contains(update.Alerts, a => a.Code == "ARMA3_ESC_PRESSED" && a.Severity == QualityAlertSeverity.Critical);
+        Assert.Equal("ARMA3_ESC_PRESSED", update.Stop?.Code);
+    }
+
+    [Fact]
+    public void Game_fps_50_is_ok_and_49_warns_after_two_half_second_samples()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        guard.Observe(Sample(1, fps: 30), t);
-        guard.Observe(Sample(2, fps: 29), t.AddMilliseconds(500));
+        guard.Observe(Sample(1, fps: 50), t);
+        guard.Observe(Sample(2, fps: 49), t.AddMilliseconds(500));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
-        guard.Observe(Sample(3, fps: 29.5), t.AddSeconds(1));
+        guard.Observe(Sample(3, fps: 49), t.AddSeconds(1));
         Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" && a.Severity == QualityAlertSeverity.Warning);
     }
 
     [Fact]
-    public void Game_fps_alert_recovers_after_two_seconds_at_32_or_more_and_holds_five_seconds()
+    public void Game_fps_below_45_escalates_to_critical_after_two_samples()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        guard.Observe(Sample(1, fps: 29), t);
-        guard.Observe(Sample(2, fps: 29), t.AddMilliseconds(500));
+        guard.Observe(Sample(1, fps: 44), t);
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
+        guard.Observe(Sample(2, fps: 44), t.AddMilliseconds(500));
+        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" && a.Severity == QualityAlertSeverity.Critical);
+    }
+
+    [Fact]
+    public void Game_fps_alert_recovers_after_two_seconds_at_52_or_more_and_holds_five_seconds()
+    {
+        var guard = new Arma3GuardEvaluator();
+        var t = DateTime.UtcNow;
+        guard.Observe(Sample(1, fps: 49), t);
+        guard.Observe(Sample(2, fps: 49), t.AddMilliseconds(500));
         for (int i = 0; i < 4; i++)
             guard.Observe(Sample(3 + i, fps: 60), t.AddSeconds(1 + i * 0.5));
         Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
@@ -92,24 +115,26 @@ public sealed class Arma3GuardEvaluatorTests
     }
 
     [Fact]
-    public void Camera_mode_change_is_reported_but_not_automatically_stopped()
+    public void Camera_mode_change_requests_party_stop_immediately()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
         guard.Observe(Sample(1, view: "INTERNAL"), t);
-        var update = guard.Observe(Sample(2, view: "EXTERNAL"), t.AddMilliseconds(500));
-        Assert.Contains(update.Alerts, a => a.Code == "ARMA3_CAMERA_MODE_CHANGED");
-        Assert.Null(update.StopReason);
+        var update = guard.Observe(Sample(1, view: "EXTERNAL"), t.AddMilliseconds(100));
+        Assert.Contains(update.Alerts, a => a.Code == "ARMA3_CAMERA_MODE_CHANGED" && a.Severity == QualityAlertSeverity.Critical);
+        Assert.Equal("ARMA3_CAMERA_MODE_CHANGED", update.Stop?.Code);
     }
 
     [Fact]
-    public void Duplicate_render_rows_do_not_advance_half_second_thresholds()
+    public void Duplicate_metric_rows_do_not_advance_fps_threshold_but_camera_change_is_still_checked()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        guard.Observe(Sample(1, fps: 29), t);
-        guard.Observe(Sample(1, fps: 29), t.AddSeconds(1));
-        Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
+        guard.Observe(Sample(1, fps: 49), t);
+        var duplicate = guard.Observe(Sample(1, fps: 49), t.AddSeconds(1));
+        Assert.DoesNotContain(duplicate.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
+        var changed = guard.Observe(Sample(1, fps: 49, view: "EXTERNAL"), t.AddSeconds(1.1));
+        Assert.Equal("ARMA3_CAMERA_MODE_CHANGED", changed.Stop?.Code);
     }
 
     [Fact]
