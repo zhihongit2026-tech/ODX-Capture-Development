@@ -531,7 +531,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
             problem = _focusLostSessionId == sessionId ? FocusLostProblem(sessionId) :
                 _guardStopSessionId == sessionId ? _guardStopProblem :
-                alerts.Any(a => a.Severity is QualityAlertSeverity.Warning or QualityAlertSeverity.Critical)
+                alerts.Any(a => a.Severity is QualityAlertSeverity.Warning or QualityAlertSeverity.Critical ||
+                                  a.Code == "ODX_VIDEO_FRAMES")
                     ? PartyAlertCodec.Encode(sessionId, alerts)
                     : _run?.Problem;
 
@@ -886,6 +887,20 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
         var result = await run.Completion;
         if (etl is not null) await StopPacketsAsync(etl, result.SessionDir, stop);
+
+        // The QA threshold is per member's finalized video, never a Party-wide sum.
+        if (result.Report is { } captureReport)
+        {
+            var checkedReport = captureReport.RequireMinimumFrames(PartyRoundRequirements.MinimumVideoFrames);
+            if (checkedReport.Verdict == CaptureReport.Failed && captureReport.Frames < PartyRoundRequirements.MinimumVideoFrames)
+                result = result with
+                {
+                    CaptureOk = false,
+                    Failure = checkedReport.Failure,
+                    Report = checkedReport,
+                };
+        }
+
         string? retakeReason;
         lock (_gate) retakeReason = _retakeRequiredSessionId == s.SessionId ? _retakeRequiredReason : null;
         if (retakeReason is not null && result.Report is { } reportForRetake)
