@@ -479,8 +479,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 return true;
             }
         }
-        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
-                                  e is OperationCanceledException && !stop.IsCancellationRequested)
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException or OperationCanceledException)
         {
         }
 
@@ -531,8 +530,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             }
             return true;
         }
-        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException ||
-                                  e is OperationCanceledException && !stop.IsCancellationRequested)
+        catch (Exception e) when (e is WebSocketException or ObjectDisposedException or InvalidOperationException or OperationCanceledException)
         {
             lock (_gate)
             {
