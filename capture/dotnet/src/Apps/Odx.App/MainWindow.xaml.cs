@@ -205,6 +205,17 @@ public partial class MainWindow : Window
 
     private void ApplyLanguage()
     {
+        WorkspaceTitleText.Text = _t.Workspace;
+        NavDashboardText.Text = _t.NavOverview;
+        NavCaptureText.Text = _t.NavCapture;
+        NavPartyText.Text = _t.NavParty;
+        NavSettingsText.Text = _t.NavSettings;
+        DashboardTitleText.Text = _t.DashboardTitle;
+        CaptureTitleText.Text = _t.CaptureTitle;
+        SettingsTitleText.Text = _t.SettingsTitle;
+        PartyTitleText.Text = _t.PartyTitle;
+        HotkeyHelpText.Text = _t.HotkeyHelp;
+        AiGuardHelpText.Text = _t.AiGuardHelp;
         LanguageLabel.Content = _t.Language;
         SourceLabel.Content = _t.Source;
         GameLabel.Content = _t.GameProfile;
