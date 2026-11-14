@@ -8,7 +8,11 @@
         <StackPanel>
             <DockPanel>
                 <TextBlock Text="ODX SMART GUARD" Foreground="#FFB8C7D9" FontSize="11" FontWeight="Bold" />
-                <TextBlock x:Name="StateText" DockPanel.Dock="Right" Foreground="#FF64D98B" FontSize="11" FontWeight="Bold" Text="MONITORING" />
+                <TextBlock x:Name="CountdownText" DockPanel.Dock="Right" Foreground="#FFFFFFFF" FontSize="13" FontWeight="Bold" Text="03:55" />
+            </DockPanel>
+            <DockPanel Margin="0,3,0,0">
+                <TextBlock Text="TIME LEFT" Foreground="#FF8F9BAA" FontSize="9" FontWeight="SemiBold" />
+                <TextBlock x:Name="StateText" DockPanel.Dock="Right" Foreground="#FF64D98B" FontSize="10" FontWeight="Bold" Text="MONITORING" />
             </DockPanel>
             <ItemsControl x:Name="AlertList" Margin="0,6,0,0">
                 <ItemsControl.ItemTemplate>
