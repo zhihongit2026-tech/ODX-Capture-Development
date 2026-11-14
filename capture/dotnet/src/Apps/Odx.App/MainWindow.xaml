@@ -831,6 +831,7 @@
                         </Grid>
                         <WrapPanel x:Name="RoomPanel" Grid.Row="2" Margin="8,0,0,0"
                                    Orientation="Horizontal" VerticalAlignment="Center">
+                            <Label x:Name="RoomLabel" Content="Room" Width="134" />
                             <TextBox x:Name="RoomBox" AutomationProperties.AutomationId="RoomBox"
                                      Width="166" IsReadOnly="True" Visibility="Collapsed"
                                      FontFamily="Consolas" FontSize="16" FontWeight="Bold"
