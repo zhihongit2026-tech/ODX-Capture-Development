@@ -127,7 +127,7 @@ TEST_CASE("Arma 3 log follows control.txt and matches the arma3_camera.csv fixtu
         std::string payload = row.substr(comma + 1);
         REQUIRE(arma3_frame_ok(payload));
         log.write(std::stod(row.substr(0, comma)), payload);
-        expected += row + ",,,,,,,,,,,\n";
+        expected += row + ",,,,,,,,,,,,\n";
     }
     log.poll();
     std::filesystem::remove(control);
@@ -139,12 +139,15 @@ TEST_CASE("Arma 3 log follows control.txt and matches the arma3_camera.csv fixtu
 
 TEST_CASE("Arma 3 frame payloads accept legacy camera rows and extended guard rows") {
     const std::string camera = "INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75";
-    const std::string guard = camera + ",60.0,1,2,3,0.1,,0,2,2,1,7";
+    const std::string guard = camera + ",60.0,1,2,3,0.1,,0,2,2,1,7,0";
+    const std::string guardWithEsc = camera + ",60.0,1,2,3,0.1,,0,2,2,1,7,1";
     CHECK(arma3_frame_ok(camera));
     CHECK(arma3_frame_ok(guard));
+    CHECK(arma3_frame_ok(guardWithEsc));
     CHECK_FALSE(arma3_frame_ok("INTERNAL,1,2,3"));
     CHECK_FALSE(arma3_frame_ok(camera + ",1"));
     CHECK_FALSE(arma3_frame_ok(guard + ",1"));
+    CHECK_FALSE(arma3_frame_ok(guardWithEsc + ",1"));
     CHECK_FALSE(arma3_frame_ok(guard + "\nx"));
 }
 
