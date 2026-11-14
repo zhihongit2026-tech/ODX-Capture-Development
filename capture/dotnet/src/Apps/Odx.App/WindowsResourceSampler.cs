@@ -33,7 +33,7 @@ public sealed class WindowsResourceSampler : IDisposable
         InitializeNvml();
     }
 
-    public ResourceSnapshot Sample(double? freshFps, double? encoderStarvationPercent)
+    public ResourceSnapshot Sample(double? gameFps, double? encoderStarvationPercent)
     {
         double? cpu = ReadCpuPercent();
         var memory = ReadMemoryPercent();
@@ -53,7 +53,7 @@ public sealed class WindowsResourceSampler : IDisposable
             gpuEncodePdh ?? nvml.EncoderPercent,
             vramPdh ?? nvml.VramPercent,
             nvml.TemperatureC,
-            freshFps,
+            gameFps,
             encoderStarvationPercent);
     }
 
