@@ -33,6 +33,24 @@ public sealed class Arma3GuardEvaluatorTests
         Assert.Contains("Action menu", update.Stop?.Reason ?? string.Empty);
     }
 
+    [Theory]
+    [InlineData("ARMA3_ESC_PRESSED")]
+    [InlineData("ARMA3_CAMERA_MODE_CHANGED")]
+    [InlineData("ARMA3_COMMAND_MENU")]
+    public void Mandatory_game_guard_events_stop_standalone_capture(string code)
+    {
+        Assert.True(Arma3GuardEvaluator.StopsStandaloneCapture(code));
+    }
+
+    [Theory]
+    [InlineData("ARMA3_GAME_FPS_LOW")]
+    [InlineData("ARMA3_TEAMMATE_VISIBILITY")]
+    [InlineData("ARMA3_PLAYER_STATIONARY")]
+    public void Non_stop_warnings_do_not_end_standalone_capture(string code)
+    {
+        Assert.False(Arma3GuardEvaluator.StopsStandaloneCapture(code));
+    }
+
     [Fact]
     public void Esc_keydown_triggers_immediate_game_guard_stop()
     {
