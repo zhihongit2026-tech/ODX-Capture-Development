@@ -904,7 +904,12 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         string? retakeReason;
         lock (_gate) retakeReason = _retakeRequiredSessionId == s.SessionId ? _retakeRequiredReason : null;
         if (retakeReason is not null && result.Report is { } reportForRetake)
-            result = result with { Report = reportForRetake with { Failure = retakeReason } };
+        {
+            string combinedFailure = reportForRetake.Failure is null
+                ? retakeReason : reportForRetake.Failure + "; " + retakeReason;
+            result = result with { CaptureOk = false, Failure = combinedFailure,
+                Report = reportForRetake with { Failure = combinedFailure } };
+        }
         if (Volatile.Read(ref _stopReason) == Stop.Cancelled)
         {
             lock (_gate)
