@@ -60,7 +60,7 @@ public partial class SmartGuardOverlay : Window
     public void UpdateFrameCount(long frames)
     {
         bool passed = frames >= PartyRoundRequirements.MinimumVideoFrames;
-        FramesText.Text = $"FRAMES {frames:N0} / {PartyRoundRequirements.MinimumVideoFrames:N0} · {(passed ? "PASS" : "CHƯA ĐẠT")}";
+        FramesText.Text = $"FRAMES {frames:N0} / {PartyRoundRequirements.MinimumVideoFrames:N0} · {(passed ? "ĐỦ NGƯỠNG LIVE" : "ĐANG GHI")}";
         FramesText.Foreground = passed ? Brushes.LightGreen : Brushes.Gold;
     }
 
@@ -75,7 +75,8 @@ public partial class SmartGuardOverlay : Window
             a.Detail,
             a.Severity == QualityAlertSeverity.Critical ? Brushes.OrangeRed :
             a.Severity == QualityAlertSeverity.Warning ? Brushes.Gold :
-            a.Code == "ODX_VIDEO_FRAMES" && !a.Detail.Contains("PASS", StringComparison.OrdinalIgnoreCase)
+            (a.Code == "ODX_VIDEO_FRAMES" || a.Code.EndsWith("_ODX_VIDEO_FRAMES", StringComparison.Ordinal)) &&
+                !a.Detail.Contains("ĐỦ NGƯỠNG LIVE", StringComparison.OrdinalIgnoreCase)
                 ? Brushes.Gold : Brushes.LightGreen)).ToArray();
         bool critical = alerts.Any(a => a.Severity == QualityAlertSeverity.Critical);
         bool warning = alerts.Any(a => a.Severity == QualityAlertSeverity.Warning);
