@@ -47,7 +47,7 @@ public partial class SmartGuardOverlay : Window
     private void UpdateCountdown()
     {
         double remaining = Math.Max(0, (_countdownEndsAtUtc - DateTime.UtcNow).TotalSeconds);
-        int seconds = (int)Math.Ceiling(remaining);
+        int seconds = Math.Min((int)Math.Ceiling(remaining), (int)PartyRoundRequirements.LiveDuration.TotalSeconds);
         CountdownText.Text = $"{seconds / 60:00}:{seconds % 60:00}";
         if (seconds == 0)
         {
