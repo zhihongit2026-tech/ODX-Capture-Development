@@ -495,13 +495,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             await SendAsync(new AgentState("recording", $"guard stop: {reason}", marker), stop);
             if (socket.State == WebSocketState.Open)
             {
-                // If this is the Host, await the Protocol 5 end-round command instead of fire-and-forget.
-                // A non-host immediately stops its invalid local take after publishing the marker; the Host receives
-                // that marker in RoomUpdate and ends the same live round for every remaining Party member.
+                // The Host ends the active round through Protocol 5. Non-hosts wait for the common Stop
+                // carrying the orchestrator's EndUtcMs so every Party video is cut at the same timestamp.
                 if (IsHost && TryClaimHostSynchronizedStop(sessionId))
                     await StopPartyForFocusLossAsync(sessionId, stop);
-                else if (!IsHost && Arma3GuardEvaluator.StopsStandaloneCapture(code))
-                    StopCapture();
 
                 _ = VerifyPartyStopAsync(sessionId, stop);
                 return true;
@@ -889,7 +886,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         if (etl is not null) await StopPacketsAsync(etl, result.SessionDir, stop);
 
         // The QA threshold is per member's finalized video, never a Party-wide sum.
-        if (result.Report is { } captureReport)
+        if (result.Recording is not null && result.Report is { } captureReport)
         {
             var checkedReport = captureReport.RequireMinimumFrames(PartyRoundRequirements.MinimumVideoFrames);
             if (checkedReport.Verdict == CaptureReport.Failed && captureReport.Frames < PartyRoundRequirements.MinimumVideoFrames)
