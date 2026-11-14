@@ -44,40 +44,37 @@ public sealed class Arma3GuardEvaluatorTests
     }
 
     [Fact]
-    public void Game_fps_30_is_ok_and_29_warns_after_two_half_second_samples()
+    public void Game_fps_50_is_ok_and_49_warns_after_two_half_second_samples()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        guard.Observe(Sample(1, fps: 30), t);
-        guard.Observe(Sample(2, fps: 29), t.AddMilliseconds(500));
+        guard.Observe(Sample(1, fps: 50), t);
+        guard.Observe(Sample(2, fps: 49), t.AddMilliseconds(500));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
-        guard.Observe(Sample(3, fps: 29), t.AddSeconds(1));
-        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" &&
-            a.Severity == QualityAlertSeverity.Warning);
+        guard.Observe(Sample(3, fps: 49), t.AddSeconds(1));
+        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" && a.Severity == QualityAlertSeverity.Warning);
     }
 
     [Fact]
-    public void Game_fps_below_30_warns_without_false_critical_escalation()
+    public void Game_fps_below_45_escalates_to_critical_after_two_samples()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        for (int i = 1; i <= 4; i++)
-            guard.Observe(Sample(i, fps: 29), t.AddMilliseconds(i * 500));
-        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" &&
-            a.Severity == QualityAlertSeverity.Warning);
-        Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" &&
-            a.Severity == QualityAlertSeverity.Critical);
+        guard.Observe(Sample(1, fps: 44), t);
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
+        guard.Observe(Sample(2, fps: 44), t.AddMilliseconds(500));
+        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW" && a.Severity == QualityAlertSeverity.Critical);
     }
 
     [Fact]
-    public void Game_fps_alert_recovers_after_two_seconds_at_30_or_more_and_holds_five_seconds()
+    public void Game_fps_alert_recovers_after_two_seconds_at_52_or_more_and_holds_five_seconds()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        guard.Observe(Sample(1, fps: 29), t);
-        guard.Observe(Sample(2, fps: 29), t.AddMilliseconds(500));
+        guard.Observe(Sample(1, fps: 49), t);
+        guard.Observe(Sample(2, fps: 49), t.AddMilliseconds(500));
         for (int i = 0; i < 4; i++)
-            guard.Observe(Sample(3 + i, fps: 30), t.AddSeconds(1 + i * 0.5));
+            guard.Observe(Sample(3 + i, fps: 60), t.AddSeconds(1 + i * 0.5));
         Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
         guard.Expire(t.AddSeconds(7.6));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_GAME_FPS_LOW");
