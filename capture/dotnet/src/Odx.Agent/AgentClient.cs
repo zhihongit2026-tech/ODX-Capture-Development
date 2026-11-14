@@ -495,11 +495,11 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             if (socket.State == WebSocketState.Open)
             {
                 // If this is the Host, await the Protocol 5 end-round command instead of fire-and-forget.
-                // A non-host stops its own invalid take immediately after the marker is sent; the Host receives
-                // that marker in RoomUpdate and ends the same live round for the remaining Party members.
+                // A non-host immediately stops its invalid local take after publishing the marker; the Host receives
+                // that marker in RoomUpdate and ends the same live round for every remaining Party member.
                 if (IsHost && TryClaimHostSynchronizedStop(sessionId))
                     await StopPartyForFocusLossAsync(sessionId, stop);
-                else if (!IsHost && code == "ARMA3_CAMERA_MODE_CHANGED")
+                else if (!IsHost && Arma3GuardEvaluator.StopsStandaloneCapture(code))
                     StopCapture();
 
                 _ = VerifyPartyStopAsync(sessionId, stop);
