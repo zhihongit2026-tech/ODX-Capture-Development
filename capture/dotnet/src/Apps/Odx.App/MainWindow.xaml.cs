@@ -742,9 +742,6 @@ public partial class MainWindow : Window
         var local = (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts)
             .GroupBy(alert => alert.Code, StringComparer.Ordinal)
             .Select(group => group.OrderByDescending(alert => alert.Severity).First());
-        // The Host must be able to distinguish its own issue from a teammate's issue by player name.
-        if (_room is not null && !string.IsNullOrWhiteSpace(_settings.PlayerName))
-            local = local.Select(alert => alert with { Title = _settings.PlayerName.Trim() + ": " + alert.Title });
         return local.ToArray();
     }
 
@@ -793,7 +790,11 @@ public partial class MainWindow : Window
 
     private void RefreshSmartGuardOverlay(RoomUpdate? update = null)
     {
-        var alerts = CurrentLocalGuardAlerts().Concat(CurrentPartyGuardAlerts(update)).ToArray();
+        var local = CurrentLocalGuardAlerts();
+        var namedLocal = _room is not null && !string.IsNullOrWhiteSpace(_settings.PlayerName)
+            ? local.Select(alert => alert with { Title = _settings.PlayerName.Trim() + ": " + alert.Title })
+            : local;
+        var alerts = namedLocal.Concat(CurrentPartyGuardAlerts(update)).ToArray();
         _smartGuardOverlay?.UpdateAlerts(alerts);
     }
 
