@@ -15,7 +15,7 @@ public sealed class Arma3GuardEvaluator
     private readonly Dictionary<string, QualityAlert> _alerts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTime> _clearAfter = new(StringComparer.Ordinal);
     private long _lastSampleId = -1;
-    private int _lowFpsSamples, _criticalFpsSamples, _fpsRecoverySamples;
+    private int _lowFpsSamples, _fpsRecoverySamples;
     private int _missingTeammateSamples, _teammateRecoverySamples;
     private int _stationarySamples, _movementRecoverySamples;
     private int _cameraRecoverySamples;
@@ -81,33 +81,19 @@ public sealed class Arma3GuardEvaluator
         }
         _lastSampleId = sample.SampleId;
 
-        // Game FPS only. Recorder/FFmpeg FPS is intentionally not used for any FPS alert.
-        if (sample.GameFps < 45.0)
+        // Only in-game FPS is evaluated; recorder and FFmpeg frame rates never trigger this alert.
+        if (sample.GameFps < 30.0)
         {
             _lowFpsSamples++;
-            _criticalFpsSamples++;
-            _fpsRecoverySamples = 0;
-            if (_criticalFpsSamples >= 2)
-                Set(new QualityAlert("ARMA3_GAME_FPS_LOW", QualityAlertSeverity.Critical,
-                    "FPS trong game dưới 45", $"Arma 3 đang chạy khoảng {sample.GameFps:0.#} FPS; mức đỏ là dưới 45 FPS."));
-            else if (_lowFpsSamples >= 2)
-                Set(new QualityAlert("ARMA3_GAME_FPS_LOW", QualityAlertSeverity.Warning,
-                    "FPS trong game dưới 50", $"Arma 3 đang chạy khoảng {sample.GameFps:0.#} FPS; mức vàng là dưới 50 FPS."));
-        }
-        else if (sample.GameFps < 50.0)
-        {
-            _lowFpsSamples++;
-            _criticalFpsSamples = 0;
             _fpsRecoverySamples = 0;
             if (_lowFpsSamples >= 2)
                 Set(new QualityAlert("ARMA3_GAME_FPS_LOW", QualityAlertSeverity.Warning,
-                    "FPS trong game dưới 50", $"Arma 3 đang chạy khoảng {sample.GameFps:0.#} FPS; mức vàng là dưới 50 FPS."));
+                    "FPS trong game dưới 30", $"Arma 3 đang chạy khoảng {sample.GameFps:0.#} FPS; chỉ cảnh báo khi dưới 30 FPS."));
         }
         else
         {
             _lowFpsSamples = 0;
-            _criticalFpsSamples = 0;
-            if (sample.GameFps >= 52 && _alerts.ContainsKey("ARMA3_GAME_FPS_LOW"))
+            if (_alerts.ContainsKey("ARMA3_GAME_FPS_LOW"))
             {
                 if (++_fpsRecoverySamples >= 4) Clear("ARMA3_GAME_FPS_LOW", nowUtc);
             }
