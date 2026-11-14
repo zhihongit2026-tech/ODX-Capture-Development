@@ -22,16 +22,15 @@ public sealed class QualityGuardTests
     }
 
     [Fact]
-    public void FPS_below_30_is_reported_immediately_but_30_is_not()
+    public void Recorder_and_FFmpeg_output_fps_never_create_an_fps_drop_alert()
     {
         var guard = new QualityGuard(30);
         var t = DateTime.UtcNow;
         guard.Observe(Started(), t);
         guard.Observe(Progress(30), t.AddSeconds(1));
         guard.Observe(Progress(60), t.AddSeconds(2));
-        Assert.DoesNotContain(guard.Alerts, a => a.Code == "FPS_DROP");
         guard.Observe(Progress(89), t.AddSeconds(3));
-        Assert.Contains(guard.Alerts, a => a.Code == "FPS_DROP" && a.Severity == QualityAlertSeverity.Critical);
+        Assert.DoesNotContain(guard.Alerts, a => a.Code.Contains("FPS", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
