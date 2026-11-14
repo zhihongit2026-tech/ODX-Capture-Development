@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     private System.Threading.Timer? _focusMonitorTimer;
     private static readonly string[] InputMethodProcesses = ["UniKeyNT", "UniKey", "VietKeyNT", "VietKey"];
     private string? _imeUnreadyForRoom;
+    private string? _resolutionWarningForRoom, _resolutionUnreadyForRoom;
     private bool _closeWhenIdle;
     /// <summary>Windows that can be recorded, listed off the UI thread (~200 ms) once the window is up and on Refresh.</summary>
     private List<SourceItem> _windows = [];
@@ -551,6 +552,28 @@ public partial class MainWindow : Window
     private void CheckRoomPreflight()
     {
         if (_room is not { } room || _run is not null || _state != RunState.Agent) return;
+
+        if (!TryValidateArma3Resolution(out string resolutionProblem))
+        {
+            string? roomCode = room.Agent.Room?.Code;
+            if (_resolutionWarningForRoom != roomCode)
+            {
+                _resolutionWarningForRoom = roomCode;
+                SetStatus(_ => resolutionProblem);
+            }
+            if (!room.Agent.IsHost && room.Agent.IsReady && _resolutionUnreadyForRoom != roomCode)
+            {
+                _resolutionUnreadyForRoom = roomCode;
+                _ = room.Agent.SetReadyAsync(false, CancellationToken.None);
+            }
+            return;
+        }
+
+        bool resolutionWasWarning = _resolutionWarningForRoom is not null;
+        _resolutionWarningForRoom = null;
+        _resolutionUnreadyForRoom = null;
+        if (resolutionWasWarning && _run is null) ShowAgentStatus();
+
         var runningIme = GetRunningInputMethod();
         if (runningIme is null)
         {
@@ -565,6 +588,61 @@ public partial class MainWindow : Window
             _ = room.Agent.SetReadyAsync(false, CancellationToken.None);
         }
     }
+
+    /// <summary>
+    /// Arma 3 Party rounds require an exact 1280x720 game client area. Use the selected Arma 3 profile's process
+    /// (or the selected capture process) and block readiness/start when the window is absent or its client size is unknown.
+    /// </summary>
+    private bool TryValidateArma3Resolution(out string problem)
+    {
+        var game = GameBox.SelectedItem as GameItem;
+        string? processName = game?.WindowProcess ?? _settings.WindowProcess;
+        bool isArma3 = (game?.Game ?? game?.Label ?? "").Contains("Arma 3", StringComparison.OrdinalIgnoreCase) ||
+                       (processName?.Contains("arma3", StringComparison.OrdinalIgnoreCase) == true);
+        if (!isArma3)
+        {
+            problem = "";
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            problem = "KHÔNG XÁC ĐỊNH ĐƯỢC ĐỘ PHÂN GIẢI ARMA 3. Chọn đúng hồ sơ Arma 3 và cửa sổ game trước khi Ready/Start Live.";
+            return false;
+        }
+
+        string process = Path.GetFileNameWithoutExtension(processName);
+        foreach (var candidate in Process.GetProcessesByName(process))
+        {
+            using (candidate)
+            {
+                IntPtr hwnd;
+                try { hwnd = candidate.MainWindowHandle; }
+                catch (InvalidOperationException) { continue; }
+                if (hwnd == IntPtr.Zero || !GetClientRect(hwnd, out var rect)) continue;
+
+                int width = rect.Right - rect.Left;
+                int height = rect.Bottom - rect.Top;
+                if (width == 1280 && height == 720)
+                {
+                    problem = "";
+                    return true;
+                }
+
+                problem = $"SAI ĐỘ PHÂN GIẢI ARMA 3: hiện tại {width}x{height}; bắt buộc 1280x720. Đã chặn Ready/Start Live. Hãy chỉnh độ phân giải trong game rồi thử lại.";
+                return false;
+            }
+        }
+
+        problem = $"KHÔNG ĐỌC ĐƯỢC CỬA SỔ ARMA 3 ({process}). Hãy mở Arma 3, vào màn hình game và bảo đảm cửa sổ có độ phân giải 1280x720 trước khi Ready/Start Live.";
+        return false;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ClientRect { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(IntPtr hwnd, out ClientRect rect);
 
     private static string? GetRunningInputMethod()
     {
@@ -1258,6 +1336,11 @@ public partial class MainWindow : Window
     private async void ToggleReady()
     {
         if (_room is not { } room) return;
+        if (!room.Agent.IsReady && !TryValidateArma3Resolution(out string resolutionProblem))
+        {
+            SetStatus(_ => resolutionProblem);
+            return;
+        }
         if (!room.Agent.IsReady && GetRunningInputMethod() is { } ime)
         {
             SetStatus(_ => $"Tắt {ime}.exe trước khi sẵn sàng vào Party.");
@@ -1270,6 +1353,12 @@ public partial class MainWindow : Window
     private async void ToggleRound()
     {
         if (_room is not { } room) return;
+        if (room.Agent.Room is { CurrentSession: null } &&
+            !TryValidateArma3Resolution(out string resolutionProblem))
+        {
+            SetStatus(_ => resolutionProblem);
+            return;
+        }
         if (room.Agent.Room is { CurrentSession: null } && GetRunningInputMethod() is { } ime)
         {
             SetStatus(_ => $"Tắt {ime}.exe trước khi bắt đầu lượt Party.");
