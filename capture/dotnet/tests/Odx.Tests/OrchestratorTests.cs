@@ -30,15 +30,16 @@ public sealed class OrchestratorTests : IAsyncLifetime
         public string? Problem => null;
         public event Action<string?>? ProblemChanged { add { } remove { } }
         public IReadOnlyList<QualityAlert> GameAlerts { get; private set; } = [];
-        public string? GuardStopReason { get; private set; }
+        public double? GameFps => null;
+        public Arma3GuardStop? GuardStop { get; private set; }
         public event Action<IReadOnlyList<QualityAlert>>? GameAlertsChanged;
-        public event Action<string>? GuardStopRequested;
-        public void RequestGuardStop(string reason)
+        public event Action<Arma3GuardStop>? GuardStopRequested;
+        public void RequestGuardStop(Arma3GuardStop requested)
         {
-            GuardStopReason = reason;
-            GameAlerts = [new QualityAlert("ARMA3_COMMAND_MENU", QualityAlertSeverity.Critical, "Arma 3 menu open", reason)];
+            GuardStop = requested;
+            GameAlerts = [new QualityAlert(requested.Code, QualityAlertSeverity.Critical, "Arma 3 guard stop", requested.Reason)];
             GameAlertsChanged?.Invoke(GameAlerts);
-            GuardStopRequested?.Invoke(reason);
+            GuardStopRequested?.Invoke(requested);
         }
         private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         /// <summary>What the agent passed in: the round's start (Start.StartUtcMs) and, at Stop, its end, by player.</summary>
@@ -656,7 +657,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.NotNull(sessionId);
 
         string player = hostTriggers ? "menu-host" : "menu-member";
-        FakeCapture.Instances[player].RequestGuardStop("RETAKE_REQUIRED: Arma 3 command menu was open (RscGroupRootMenu).");
+        FakeCapture.Instances[player].RequestGuardStop(new Arma3GuardStop("ARMA3_COMMAND_MENU", "RETAKE_REQUIRED: Arma 3 command menu was open (RscGroupRootMenu)."));
         var record = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
 
         Assert.Equal(2, record.Players.Count);
