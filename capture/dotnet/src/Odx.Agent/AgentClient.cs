@@ -364,8 +364,17 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
 
         bool focusLost = update.Members.Any(member => member.Problem == FocusLostProblem(session));
         bool guardStop = guardReporter is not null;
-        if (!IsHost || update.Countdown || (!focusLost && !guardStop)) return;
+        if (!IsHost || (!focusLost && !guardStop)) return;
+        RequestHostSynchronizedStop(session, stop);
+    }
 
+    /// <summary>
+    /// The existing Protocol 5 host-only stop is also requested immediately on the Host's own game-guard event.
+    /// Waiting for a reflected RoomUpdate can delay the stop; the session guard prevents double toggles.
+    /// </summary>
+    private void RequestHostSynchronizedStop(string session, CancellationToken stop)
+    {
+        if (!IsHost || Room?.CurrentSession != session) return;
         string? previous = Volatile.Read(ref _focusStopRequestedSession);
         if (previous == session) return;
         if (Interlocked.CompareExchange(ref _focusStopRequestedSession, session, previous) != previous) return;
@@ -448,9 +457,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         if (!ToggleRound.IsValidSessionId(sessionId) ||
             string.IsNullOrWhiteSpace(code) || code.Any(c => !(char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_')))
             return false;
-        if ((code is "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED") && Room?.Members.Count != 4)
-            return false;
-
+        // Never ignore a real ESC/camera stop because peers have not all joined, or a RoomUpdate
+        // briefly reports fewer than four members. The active round must still be ended.
         bool active;
         string marker = GuardStopProblem(sessionId, code);
         lock (_gate)
@@ -462,11 +470,16 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _guardStopProblem = marker;
             }
         }
-        if (!active) return false;
+        if (!active)
+        {
+            Log?.Invoke($"guard stop {code} was ignored because round {sessionId} is no longer recording");
+            return false;
+        }
 
         var socket = _socket;
         if (socket is not { State: WebSocketState.Open })
         {
+            Log?.Invoke($"guard stop {code}: no Protocol 5 connection; stopping the local capture");
             StopCapture();
             return false;
         }
@@ -476,6 +489,9 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             await SendAsync(new AgentState("recording", $"guard stop: {reason}", marker), stop);
             if (socket.State == WebSocketState.Open)
             {
+                // The Host ends the round immediately, without waiting for its own reflected
+                // RoomUpdate. Non-hosts trigger the same stop when their marker reaches the Host.
+                RequestHostSynchronizedStop(sessionId, stop);
                 _ = VerifyPartyStopAsync(sessionId, stop);
                 return true;
             }
