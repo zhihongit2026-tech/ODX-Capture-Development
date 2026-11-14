@@ -20,8 +20,8 @@ public sealed class Arma3GuardEvaluator
     private readonly Dictionary<string, DateTime> _clearAfter = new(StringComparer.Ordinal);
     private long _lastSampleId = -1;
     private int _lowFpsSamples, _criticalFpsSamples, _fpsRecoverySamples;
-    private int _missingTeammateSamples, _teammateRecoverySamples;
-    private int _stationarySamples, _movementRecoverySamples;
+    private int _teammateRecoverySamples;
+    private DateTime? _noTeammateVisibleSinceUtc;
     private int _cameraRecoverySamples;
     private string? _initialCameraView;
     private Arma3GuardStop? _stop;
@@ -120,56 +120,38 @@ public sealed class Arma3GuardEvaluator
 
         if (sample.TotalTeammates <= 0)
         {
-            _missingTeammateSamples = 0;
+            _noTeammateVisibleSinceUtc = null;
             _teammateRecoverySamples = 0;
+            Remove("ARMA3_TEAMMATE_VISIBILITY");
             Set(new QualityAlert("ARMA3_TEAMMATES_NOT_VERIFIED", QualityAlertSeverity.Info,
                 "Chưa xác minh được đồng đội", "Không tìm thấy người chơi cùng phe trong telemetry Arma 3; không tự đánh dấu PASS."));
         }
         else
         {
             Clear("ARMA3_TEAMMATES_NOT_VERIFIED", nowUtc);
-            if (sample.VisibleTeammates < sample.TotalTeammates)
+            // A four-player Party has at most three teammates. Seeing any one of them is sufficient;
+            // do not require all teammates to fit in the camera frame.
+            if (sample.VisibleTeammates < 1 || sample.VisibleTeammates > 3)
             {
-                _missingTeammateSamples++;
                 _teammateRecoverySamples = 0;
-                if (_missingTeammateSamples >= 4)
+                _noTeammateVisibleSinceUtc ??= nowUtc;
+                if (nowUtc - _noTeammateVisibleSinceUtc.Value >= TimeSpan.FromSeconds(2))
                     Set(new QualityAlert("ARMA3_TEAMMATE_VISIBILITY", QualityAlertSeverity.Critical,
-                        "Mất tầm nhìn đồng đội trên 2 giây", $"Đang thấy {sample.VisibleTeammates}/{sample.TotalTeammates} đồng đội trong khung hình."));
-                else if (_missingTeammateSamples >= 2)
-                    Set(new QualityAlert("ARMA3_TEAMMATE_VISIBILITY", QualityAlertSeverity.Warning,
-                        "Không thấy đủ đồng đội trong khung hình", $"Đang thấy {sample.VisibleTeammates}/{sample.TotalTeammates} đồng đội; kiểm tra hướng camera."));
+                        "Không thấy đồng đội trong khung hình 2 giây",
+                        $"Không thấy đồng đội nào trong khung hình (0/{Math.Min(3, sample.TotalTeammates)}). Phải nhìn thấy ít nhất 1 trong 1–3 đồng đội."));
             }
             else
             {
-                _missingTeammateSamples = 0;
+                _noTeammateVisibleSinceUtc = null;
                 if (_alerts.ContainsKey("ARMA3_TEAMMATE_VISIBILITY"))
                 {
-                    if (++_teammateRecoverySamples >= 4) Clear("ARMA3_TEAMMATE_VISIBILITY", nowUtc);
+                    if (++_teammateRecoverySamples >= 2) Remove("ARMA3_TEAMMATE_VISIBILITY");
                 }
                 else _teammateRecoverySamples = 0;
             }
         }
 
-        if (sample.PlayerAlive && sample.PlayerSpeedMps < 0.2)
-        {
-            _stationarySamples++;
-            _movementRecoverySamples = 0;
-            if (_stationarySamples >= 20)
-                Set(new QualityAlert("ARMA3_PLAYER_STATIONARY", QualityAlertSeverity.Critical,
-                    "Người chơi đứng yên trên 10 giây", $"Tốc độ nhân vật khoảng {sample.PlayerSpeedMps:0.00} m/s."));
-            else if (_stationarySamples >= 10)
-                Set(new QualityAlert("ARMA3_PLAYER_STATIONARY", QualityAlertSeverity.Warning,
-                    "Người chơi đứng yên trên 5 giây", $"Tốc độ nhân vật khoảng {sample.PlayerSpeedMps:0.00} m/s."));
-        }
-        else
-        {
-            _stationarySamples = 0;
-            if (_alerts.ContainsKey("ARMA3_PLAYER_STATIONARY"))
-            {
-                if (++_movementRecoverySamples >= 4) Clear("ARMA3_PLAYER_STATIONARY", nowUtc);
-            }
-            else _movementRecoverySamples = 0;
-        }
+        // Player movement is intentionally not a guard condition. Standing still is valid gameplay.
 
         Expire(nowUtc);
         return new Arma3GuardUpdate(Alerts, _stop, !before.SequenceEqual(Snapshot()));
@@ -204,6 +186,12 @@ public sealed class Arma3GuardEvaluator
     private void Clear(string code, DateTime nowUtc)
     {
         if (_alerts.ContainsKey(code)) _clearAfter.TryAdd(code, nowUtc + AlertHold);
+    }
+
+    private void Remove(string code)
+    {
+        _clearAfter.Remove(code);
+        _alerts.Remove(code);
     }
 
     private void ClearAfter(string code, DateTime nowUtc) => _clearAfter[code] = nowUtc + AlertHold;
