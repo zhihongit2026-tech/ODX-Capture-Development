@@ -833,9 +833,18 @@ public partial class MainWindow : Window
             ? gameGuard.GameAlerts : Array.Empty<QualityAlert>();
         // Game-guard violations may also appear in QualityGuard as external alerts.
         // Show each code once rather than duplicating ESC and camera stop warnings.
-        var local = (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts)
+        IEnumerable<QualityAlert> local = (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts)
             .GroupBy(alert => alert.Code, StringComparer.Ordinal)
             .Select(group => group.OrderByDescending(alert => alert.Severity).First());
+
+        // Every Party member reports its own live video frame count; the Host sees each named member separately.
+        if (_room?.Agent.Room?.CurrentSession is not null && _run?.LastStatus is { } frameStatus)
+        {
+            long frames = frameStatus.Frames;
+            local = local.Append(new QualityAlert("ODX_VIDEO_FRAMES", QualityAlertSeverity.Info,
+                $"FRAMES {frames:N0} / {PartyRoundRequirements.MinimumVideoFrames:N0}",
+                frames >= PartyRoundRequirements.MinimumVideoFrames ? "PASS" : "CHƯA ĐẠT"));
+        }
         return local.ToArray();
     }
 
@@ -1077,6 +1086,7 @@ public partial class MainWindow : Window
         var status = _run.LastStatus;
         string dir = _run.SessionDir;
         SetStatus(t => t.RecordingStatus(elapsed, status, dir));
+        _smartGuardOverlay?.UpdateFrameCount(status?.Frames ?? 0);
         _tray.Text = _t.TrayTooltip($"{elapsed:hh\\:mm\\:ss}");
     }
 
@@ -1229,36 +1239,44 @@ public partial class MainWindow : Window
     private static readonly string ZeroTierTray =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ZeroTier", "One", "zerotier_desktop_ui.exe");
 
-    // Host-side safety timer, compatible with the deployed orchestrator: host sends the existing
-    // ToggleRound stop command so the server broadcasts one common Stop to every room member.
+    // The Host's timer is anchored to the orchestrator's StartUtcMs and clock offset. It sends the existing
+    // Protocol 5 ToggleRound stop with the exact session id, so the orchestrator broadcasts one common Stop to all members.
     private void UpdateRoomAutoStop(RoomSession room, RoomUpdate update)
     {
         if (!room.Agent.IsHost || update.CurrentSession is null)
-        {
             CancelRoomAutoStop();
-            return;
-        }
-        if (update.Countdown) return; // The 3-2-1 countdown is not part of the 235 seconds.
-        if (_roomAutoStopSession == update.CurrentSession) return;
+    }
+
+    private void StartRoomAutoStop(RoomSession room, string session, double roundStartUtcMs)
+    {
+        if (!room.Agent.IsHost) return;
         CancelRoomAutoStop();
-        string session = update.CurrentSession;
+        double referenceOffsetMs = room.Agent.Clock?.ReferenceOffsetMs ?? 0;
+        double deadlineLocalUtcMs = roundStartUtcMs + PartyRoundRequirements.LiveDuration.TotalMilliseconds - referenceOffsetMs;
+        DateTime deadline = DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(deadlineLocalUtcMs)).UtcDateTime;
         var cancellation = new CancellationTokenSource();
         _roomAutoStopSession = session;
         _roomAutoStop = cancellation;
-        _ = StopRoomAfter235Async(room, session, cancellation.Token);
+        _ = StopRoomAtDeadlineAsync(room, session, deadline, cancellation.Token);
     }
 
-    private async Task StopRoomAfter235Async(RoomSession room, string session, CancellationToken cancellation)
+    private async Task StopRoomAtDeadlineAsync(RoomSession room, string session, DateTime deadlineUtc, CancellationToken cancellation)
     {
         try
         {
-            await Task.Delay(AutoStopAfter, cancellation);
+            TimeSpan remaining = deadlineUtc - DateTime.UtcNow;
+            if (remaining > TimeSpan.Zero) await Task.Delay(remaining, cancellation);
             await Dispatcher.InvokeAsync(async () =>
             {
                 if (cancellation.IsCancellationRequested || _room != room ||
+                    _roomAutoStopSession != session ||
                     room.Agent.Room is not { CurrentSession: var current } || current != session ||
                     !room.Agent.IsHost) return;
-                try { await room.ToggleRoundAsync(0); }
+                try
+                {
+                    // Supplying the session id makes a stale timer unable to stop a later round.
+                    await room.ToggleRoundAsync(0, session);
+                }
                 catch (Exception e) when (e is System.Net.WebSockets.WebSocketException or OperationCanceledException)
                 {
                     SetStatus(t => t.RoundToggleFailed(e.Message));
@@ -1437,8 +1455,12 @@ public partial class MainWindow : Window
             _roundResult = null;
             _runStarted = DateTime.Now;
             DateTime? countdownEndsAtUtc = options.RoundStartUtcMs is double roundStartUtcMs
-                ? DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(roundStartUtcMs)).UtcDateTime.Add(AutoStopAfter)
+                ? DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(
+                    roundStartUtcMs + PartyRoundRequirements.LiveDuration.TotalMilliseconds -
+                    (_room?.Agent.Clock?.ReferenceOffsetMs ?? 0))).UtcDateTime
                 : null;
+            if (_room is { } room && options.DirName is { } session && options.RoundStartUtcMs is double sharedStartUtcMs)
+                StartRoomAutoStop(room, session, sharedStartUtcMs);
             StartQualityGuard(run, options.WindowProcess, options.DirName, countdownEndsAtUtc);
             AttachGameGuard(run, solo: false);
             _clock.Start();
