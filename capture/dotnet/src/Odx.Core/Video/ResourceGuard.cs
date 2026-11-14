@@ -54,8 +54,8 @@ public sealed class ResourceGuard
 
         if (sample.Gpu3DPercent is double gpu3d && sample.GameFps is double fps)
         {
-            bool fpsDegraded = fps < 50;
-            Update("RESOURCE_GPU_3D", gpu3d >= 95 && fpsDegraded, gpu3d >= 98 && fpsDegraded, gpu3d < 85,
+            bool fpsDegraded = fps < 30;
+            Update("RESOURCE_GPU_3D", gpu3d >= 95 && fpsDegraded, gpu3d >= 98 && fpsDegraded, gpu3d < 85 || fps >= 30,
                 TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5),
                 "GPU 3D tải cao kèm giảm FPS game", $"GPU 3D: {gpu3d:0.#}%; FPS game: {fps:0.#}.",
                 "GPU 3D quá tải kèm giảm FPS game", $"GPU 3D: {gpu3d:0.#}%; FPS game: {fps:0.#}.", nowUtc);
