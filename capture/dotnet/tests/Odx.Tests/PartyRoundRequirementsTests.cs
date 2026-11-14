@@ -14,7 +14,7 @@ public sealed class PartyRoundRequirementsTests
     [Fact]
     public void Every_party_video_has_its_own_7000_frame_minimum()
     {
-        Assert.Equal(7000, PartyRoundRequirements.MinimumVideoFrames);
-        Assert.Equal(7200, (long)(PartyRoundRequirements.LiveDuration.TotalSeconds * 30));
+        Assert.Equal(7000L, PartyRoundRequirements.MinimumVideoFrames);
+        Assert.Equal(7200L, (long)(PartyRoundRequirements.LiveDuration.TotalSeconds * 30));
     }
 }
