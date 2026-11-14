@@ -793,6 +793,13 @@
                 <Border x:Name="PartyCard" Grid.Row="2" Style="{StaticResource CardBorder}"
                         Padding="42,16,28,16" MinHeight="188">
                     <Grid>
+                        <Canvas Grid.RowSpan="3" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                                Width="260" IsHitTestVisible="False" Opacity="0.25">
+                            <Path Data="M 150,0 L 235,0 L 110,190 L 25,190 Z"
+                                  Fill="#087C9C" Opacity="0.24" />
+                            <Path Data="M 220,0 L 260,0 L 135,190 L 95,190 Z"
+                                  Fill="#16C5D5" Opacity="0.20" />
+                        </Canvas>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="45" />
                             <RowDefinition Height="52" />
