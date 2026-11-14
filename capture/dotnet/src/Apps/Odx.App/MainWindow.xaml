@@ -61,9 +61,6 @@
                                     </Setter.Value>
                                 </Setter>
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="TextBorder" Property="Opacity" Value="0.52" />
-                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -94,9 +91,6 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True">
                                 <Setter TargetName="PasswordBorder" Property="BorderBrush" Value="#24D7F2" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="PasswordBorder" Property="Opacity" Value="0.52" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -188,9 +182,6 @@
                             <Trigger Property="IsKeyboardFocusWithin" Value="True">
                                 <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#22D6F2" />
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="ComboBorder" Property="Opacity" Value="0.48" />
-                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -223,9 +214,6 @@
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#2CE2F5" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.48" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -689,11 +677,11 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="48" />
-                                    <RowDefinition Height="48" />
-                                    <RowDefinition Height="48" />
-                                    <RowDefinition Height="43" />
-                                    <RowDefinition Height="48" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <Label x:Name="SourceLabel" Grid.Row="0" Content="Nguồn quay" />
