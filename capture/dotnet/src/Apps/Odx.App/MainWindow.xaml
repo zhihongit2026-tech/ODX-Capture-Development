@@ -831,7 +831,7 @@
                                           Grid.Row="3" Grid.Column="1" Checked="Obs_Changed"
                                           Unchecked="Obs_Changed" />
 
-                                <Label x:Name="ObsConnectionLabel" Grid.Row="4" Content="OBS Server" />
+                                <Label x:Name="ObsConnectionLabel" Grid.Row="4" Content="OBS Server" Margin="0" />
                                 <WrapPanel x:Name="ObsConnectionPanel" Grid.Row="4" Grid.Column="1"
                                             Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Style="{StaticResource CaptionTextStyle}" x:Name="ObsAddressLabel" VerticalAlignment="Center"

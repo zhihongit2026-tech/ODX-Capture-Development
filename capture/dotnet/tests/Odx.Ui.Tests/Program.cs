@@ -320,6 +320,17 @@ internal static class Program
         double scale = percent / 100.0, targetWidth = 1920 / scale, targetHeight = 1080 / scale;
         string id = $"layout-{configured}-{percent}";
         var evidence = new List<object>();
+        var auditFailures = new List<Exception>();
+        void TryAudit(string name, Func<object> audit)
+        {
+            try { evidence.Add(new { name, status = "passed", detail = audit() }); }
+            catch (Exception error)
+            {
+                auditFailures.Add(new InvalidOperationException(name + ": " + error.Message, error));
+                evidence.Add(new { name, status = "failed", error = error.ToString() });
+                Console.Error.WriteLine("FAIL " + name + ": " + error);
+            }
+        }
         string? failure = null;
         bool obsControlsVisible = false;
         Odx.App.App? application = null;
@@ -339,56 +350,81 @@ internal static class Program
             AssertVisibility(window, 0);
             var tray = (System.Windows.Forms.NotifyIcon)typeof(Odx.App.MainWindow).GetField("_tray", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
             Require(tray.ContextMenuStrip?.Font.FontFamily.Name == "Segoe UI" && Math.Abs(tray.ContextMenuStrip.Font.SizeInPoints - 10.5) < 0.1, "Tray menu does not use the shared 14-DIP Segoe UI typography.");
-            evidence.Add(CheckWrappedInkControls((TextBlock)window.FindName("PartyRosterEmptyText"), output, id));
+            TryAudit("wrapped-ink-controls", () => CheckWrappedInkControls((TextBlock)window.FindName("PartyRosterEmptyText"), output, id));
             for (int page = 0; page < Pages.Length; page++)
             {
                 if (page == 2 && !configured) continue;
-                ((Button)window.FindName(Navigation[page])).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-                Pump();
-                AssertVisibility(window, page);
-                if (page == 1)
+                TryAudit(Pages[page], () =>
                 {
-                    obsControlsVisible = ((FrameworkElement)window.FindName("ObsConnectionPanel")).IsVisible;
-                    Require(obsControlsVisible, "OBS connection controls were not shown for the typography audit.");
-                }
-                evidence.Add(AuditAndRender(window, root, output, id + "-" + Pages[page], percent, 8));
-                if (page == 0)
-                {
-                    var scroll = (ScrollViewer)window.FindName("DashboardScroll");
-                    scroll.ScrollToBottom();
+                    ((Button)window.FindName(Navigation[page])).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                     Pump();
-                    AssertVisibility(window, 0);
-                    Require(Math.Abs(scroll.VerticalOffset - scroll.ScrollableHeight) <= 1, "Overview did not reach its bottom content.");
-                    evidence.Add(AuditAndRender(window, root, output, id + "-OverviewPage-bottom", percent, 8));
-                }
+                    AssertVisibility(window, page);
+                    if (page == 1)
+                    {
+                        obsControlsVisible = ((FrameworkElement)window.FindName("ObsConnectionPanel")).IsVisible;
+                        Require(obsControlsVisible, "OBS connection controls were not shown for the typography audit.");
+                    }
+                    return AuditAndRender(window, root, output, id + "-" + Pages[page], percent, 8);
+                });
+                if (page == 0)
+                    TryAudit("OverviewPage-bottom", () =>
+                    {
+                        ((Button)window.FindName(Navigation[0])).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                        Pump();
+                        var scroll = (ScrollViewer)window.FindName("DashboardScroll");
+                        scroll.ScrollToBottom();
+                        Pump();
+                        AssertVisibility(window, 0);
+                        Require(Math.Abs(scroll.VerticalOffset - scroll.ScrollableHeight) <= 1, "Overview did not reach its bottom content.");
+                        return AuditAndRender(window, root, output, id + "-OverviewPage-bottom", percent, 8);
+                    });
             }
-            var toast = (Odx.App.ToastOverlay)Activator.CreateInstance(typeof(Odx.App.ToastOverlay), nonPublic: true)!;
-            ((TextBlock)toast.FindName("TitleText")).Text = "Đã lưu lượt ghi hình";
-            ((TextBlock)toast.FindName("BodyText")).Text = "Nguyễn Thị Ánh · Dữ liệu được giữ nguyên để kiểm tra.";
-            var guard = new Odx.App.SmartGuardOverlay();
-            guard.UpdateFrameCount(1234);
-            guard.UpdateAlerts([new Odx.Core.QualityAlert("TEST_ONLY", Odx.Core.QualityAlertSeverity.Warning, "Cảnh báo kiểm tra chữ tiếng Việt", "Dữ liệu minh họa chỉ nằm trong bộ kiểm thử giao diện.")]);
-            foreach (Window auxiliary in new Window[] { new Odx.App.JoinRoomDialog(Odx.App.Strings.Vi), toast, guard, new Odx.App.CountdownOverlay { Text = "ĐANG LƯU" } })
+            var auxiliaries = new (string Name, Func<Window> Create)[]
             {
-                auxiliary.ApplyTemplate();
-                var content = auxiliary.Content as FrameworkElement
-                    ?? throw new InvalidOperationException("Auxiliary window has no layout content.");
-                // Rendering a detached content tree exercises typography without starting overlay capture-exclusion or timers.
-                auxiliary.Content = null;
-                var frame = new Border { Background = auxiliary.Background, Resources = auxiliary.Resources, Child = content };
-                TextElement.SetFontFamily(frame, auxiliary.FontFamily);
-                TextElement.SetFontSize(frame, auxiliary.FontSize);
-                TextElement.SetFontWeight(frame, auxiliary.FontWeight);
-                TextElement.SetFontStyle(frame, auxiliary.FontStyle);
-                TextElement.SetFontStretch(frame, auxiliary.FontStretch);
-                TextElement.SetForeground(frame, auxiliary.Foreground);
-                frame.Measure(new Size(targetWidth, double.PositiveInfinity));
-                frame.Arrange(new Rect(frame.DesiredSize));
-                frame.UpdateLayout();
-                Pump();
-                evidence.Add(AuditAndRender(auxiliary, content, output, id + "-" + auxiliary.GetType().Name, percent, 1, frame));
-                auxiliary.Close();
-            }
+                (nameof(Odx.App.JoinRoomDialog), () => new Odx.App.JoinRoomDialog(Odx.App.Strings.Vi)),
+                (nameof(Odx.App.ToastOverlay), () =>
+                {
+                    var toast = (Odx.App.ToastOverlay)Activator.CreateInstance(typeof(Odx.App.ToastOverlay), nonPublic: true)!;
+                    ((TextBlock)toast.FindName("TitleText")).Text = "Đã lưu lượt ghi hình";
+                    ((TextBlock)toast.FindName("BodyText")).Text = "Nguyễn Thị Ánh · Dữ liệu được giữ nguyên để kiểm tra.";
+                    return toast;
+                }),
+                (nameof(Odx.App.SmartGuardOverlay), () =>
+                {
+                    var guard = new Odx.App.SmartGuardOverlay();
+                    guard.UpdateFrameCount(1234);
+                    guard.UpdateAlerts([new Odx.Core.QualityAlert("TEST_ONLY", Odx.Core.QualityAlertSeverity.Warning, "Cảnh báo kiểm tra chữ tiếng Việt", "Dữ liệu minh họa chỉ nằm trong bộ kiểm thử giao diện.")]);
+                    return guard;
+                }),
+                (nameof(Odx.App.CountdownOverlay), () => new Odx.App.CountdownOverlay { Text = "ĐANG LƯU" })
+            };
+            foreach (var item in auxiliaries)
+                TryAudit(item.Name, () =>
+                {
+                    Window auxiliary = item.Create();
+                    try
+                    {
+                        auxiliary.ApplyTemplate();
+                        var content = auxiliary.Content as FrameworkElement
+                            ?? throw new InvalidOperationException("Auxiliary window has no layout content.");
+                        // Rendering a detached content tree exercises typography without starting overlay capture-exclusion or timers.
+                        auxiliary.Content = null;
+                        var frame = new Border { Background = auxiliary.Background, Resources = auxiliary.Resources, Child = content };
+                        TextElement.SetFontFamily(frame, auxiliary.FontFamily);
+                        TextElement.SetFontSize(frame, auxiliary.FontSize);
+                        TextElement.SetFontWeight(frame, auxiliary.FontWeight);
+                        TextElement.SetFontStyle(frame, auxiliary.FontStyle);
+                        TextElement.SetFontStretch(frame, auxiliary.FontStretch);
+                        TextElement.SetForeground(frame, auxiliary.Foreground);
+                        frame.Measure(new Size(targetWidth, double.PositiveInfinity));
+                        frame.Arrange(new Rect(frame.DesiredSize));
+                        frame.UpdateLayout();
+                        Pump();
+                        return AuditAndRender(auxiliary, content, output, id + "-" + item.Name, percent, 1, frame);
+                    }
+                    finally { Cleanup("close " + item.Name, auxiliary.Close); }
+                });
+            if (auditFailures.Count > 0) throw new AggregateException("One or more layout audits failed.", auditFailures);
         }
         catch (Exception error) { failure = error.ToString(); Console.Error.WriteLine(error); }
         finally
@@ -396,7 +432,7 @@ internal static class Program
             Cleanup("close layout window", () => window?.Close());
             Cleanup("shut down layout application", () => application?.Shutdown());
             if (failure is null && CleanupErrors.Count > 0) failure = string.Join("; ", CleanupErrors);
-            File.WriteAllText(Path.Combine(output, id + ".json"), JsonSerializer.Serialize(new { status = failure is null ? "passed" : "failed", mode = "WPF layout at 1920x1080 equivalent viewport and raster scale; not an OS DPI change", obsControlsVisible, evidence, failure }, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(Path.Combine(output, id + ".json"), JsonSerializer.Serialize(new { status = failure is null ? "passed" : "failed", mode = "WPF layout at 1920x1080 equivalent viewport and raster scale; not an OS DPI change", obsControlsVisible, evidence, failure, cleanupErrors = CleanupErrors }, new JsonSerializerOptions { WriteIndented = true }));
         }
         return failure is null ? 0 : 1;
     }

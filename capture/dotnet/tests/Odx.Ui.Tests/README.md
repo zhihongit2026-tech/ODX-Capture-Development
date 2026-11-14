@@ -15,6 +15,10 @@ are removed afterward. Only the extracted test copy's deployment configuration
 is changed and restored; the distribution ZIP and executable remain unchanged.
 Packaged launches and layout workers report their own results and continue after
 another case fails. Any failed case or cleanup still makes the overall run fail.
+Within each layout worker, page audits (including Overview's bottom view), the
+ink controls and auxiliary windows run sequentially and record independent
+results. One failed audit does not prevent the remaining views from producing
+evidence; all audit failures are aggregated before the worker exits nonzero.
 
 ## Executed checks
 
@@ -67,6 +71,10 @@ another case fails. Any failed case or cleanup still makes the overall run fail.
 `summary.json` records packaged runs and the actual hosted OS. Each layout case
 has its own JSON and PNG files. Layout workers use the application built from
 the same checkout; they are distinct from the packaged executable smoke test.
+Each layout evidence entry names its audit and reports `passed` with detail or
+`failed` with the exception. Setup failures can prevent audits from starting;
+an unexecuted audit is never reported as passed. Cleanup errors remain in the
+layout report even when an audit also fails.
 `*-text-metrics.json` records actual/desired sizes, requested height (null means
 Auto), own visual clip bounds, effective viewport, unclipped ink bounds and the
 independent reflow measurements, including the text that caused an assertion.
