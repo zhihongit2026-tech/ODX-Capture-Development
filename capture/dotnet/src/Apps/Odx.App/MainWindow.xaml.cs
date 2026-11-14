@@ -1253,8 +1253,7 @@ public partial class MainWindow : Window
         if (!room.Agent.IsHost) return;
         CancelRoomAutoStop();
         double referenceOffsetMs = room.Agent.Clock?.ReferenceOffsetMs ?? 0;
-        double deadlineLocalUtcMs = roundStartUtcMs + PartyRoundRequirements.LiveDuration.TotalMilliseconds - referenceOffsetMs;
-        DateTime deadline = DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(deadlineLocalUtcMs)).UtcDateTime;
+        DateTime deadline = PartyRoundRequirements.LocalDeadlineUtc(roundStartUtcMs, referenceOffsetMs);
         var cancellation = new CancellationTokenSource();
         _roomAutoStopSession = session;
         _roomAutoStop = cancellation;
@@ -1456,9 +1455,7 @@ public partial class MainWindow : Window
             _roundResult = null;
             _runStarted = DateTime.Now;
             DateTime? countdownEndsAtUtc = options.RoundStartUtcMs is double roundStartUtcMs
-                ? DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(
-                    roundStartUtcMs + PartyRoundRequirements.LiveDuration.TotalMilliseconds -
-                    (_room?.Agent.Clock?.ReferenceOffsetMs ?? 0))).UtcDateTime
+                ? PartyRoundRequirements.LocalDeadlineUtc(roundStartUtcMs, _room?.Agent.Clock?.ReferenceOffsetMs ?? 0)
                 : null;
             if (_room is { } room && options.DirName is { } session && options.RoundStartUtcMs is double sharedStartUtcMs)
                 StartRoomAutoStop(room, session, sharedStartUtcMs);
