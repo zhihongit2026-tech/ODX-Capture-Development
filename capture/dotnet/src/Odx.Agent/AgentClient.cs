@@ -447,7 +447,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
         if (!ToggleRound.IsValidSessionId(sessionId) ||
             string.IsNullOrWhiteSpace(code) || code.Any(c => !(char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_')))
             return false;
-        if (code is "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED" && Room?.Members.Count != 4)
+        if ((code is "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED") && Room?.Members.Count != 4)
             return false;
 
         bool active;
