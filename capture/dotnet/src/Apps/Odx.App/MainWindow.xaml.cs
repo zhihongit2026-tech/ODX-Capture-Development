@@ -623,7 +623,7 @@ public partial class MainWindow : Window
 
                 int width = rect.Right - rect.Left;
                 int height = rect.Bottom - rect.Top;
-                if (width == 1280 && height == 720)
+                if (Arma3ResolutionRequirement.IsSatisfied(width, height))
                 {
                     problem = "";
                     return true;
