@@ -31,8 +31,8 @@ public class Arma3CameraTests
         string path = Path.Combine(root, Arma3Camera.RawLog);
         try
         {
-            const string header = "t_qpc_ms,view,pos_x,pos_y,pos_z,right_x,right_y,right_z,up_x,up_y,up_z,fwd_x,fwd_y,fwd_z,fov_top,object_fov,game_fps,player_x,player_y,player_z,player_speed_mps,command_menu,action_menu,teammates_visible,teammates_total,player_alive,guard_sample_id";
-            const string row = "5000,INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75,59.5,100,200,5,0.4,RscGroupRootMenu,0,2,2,1,9";
+            const string header = "t_qpc_ms,view,pos_x,pos_y,pos_z,right_x,right_y,right_z,up_x,up_y,up_z,fwd_x,fwd_y,fwd_z,fov_top,object_fov,game_fps,player_x,player_y,player_z,player_speed_mps,command_menu,action_menu,teammates_visible,teammates_total,player_alive,guard_sample_id,esc_pressed";
+            const string row = "5000,INTERNAL,1,2,3,1,0,0,0,0,1,0,1,0,0.75,0.75,59.5,100,200,5,0.4,RscGroupRootMenu,0,2,2,1,9,1";
             File.WriteAllLines(path, [header, row, Arma3Camera.EndLine]);
 
             var camera = Arma3Camera.Read(path);
@@ -47,6 +47,7 @@ public class Arma3CameraTests
             Assert.Equal(2, guard.TotalTeammates);
             Assert.True(guard.PlayerAlive);
             Assert.Equal(9L, guard.SampleId);
+            Assert.True(guard.EscPressed);
         }
         finally
         {
