@@ -8,7 +8,7 @@ public sealed record Arma3CameraRow(double TQpcMs, string View, Vec3 Position, V
 
 /// <summary>Live Arma 3 telemetry appended by the updated @OdxCapture addon.</summary>
 public sealed record Arma3GuardSample(double TQpcMs, string CameraView, double GameFps, Vec3 PlayerPosition, double PlayerSpeedMps,
-    string CommandMenu, bool ActionMenu, int VisibleTeammates, int TotalTeammates, bool PlayerAlive, long SampleId);
+    string CommandMenu, bool ActionMenu, int VisibleTeammates, int TotalTeammates, bool PlayerAlive, long SampleId, bool EscPressed);
 
 /// <summary>
 /// Arma 3's camera (document/games/arma3.md §3, §5). While a round records, control.txt names the capture's raw log; the
@@ -37,7 +37,7 @@ public static class Arma3Camera
     [
         .. LegacyHeader,
         "game_fps", "player_x", "player_y", "player_z", "player_speed_mps", "command_menu", "action_menu",
-        "teammates_visible", "teammates_total", "player_alive", "guard_sample_id",
+        "teammates_visible", "teammates_total", "player_alive", "guard_sample_id", "esc_pressed",
     ];
 
     /// <summary>Same path as odx_capture_x64.dll's control_path.</summary>
@@ -119,7 +119,7 @@ public static class Arma3Camera
     public static Arma3GuardSample? ParseGuardSample(string line)
     {
         var fields = line.Split(',');
-        if (fields.Length != Header.Length || fields[0] == "t_qpc_ms" || fields[16].Length == 0 || fields[26].Length == 0)
+        if (fields.Length != Header.Length || fields[0] == "t_qpc_ms" || fields[16].Length == 0 || fields[26].Length == 0 || fields[27].Length == 0)
             return null;
         try
         {
@@ -127,7 +127,7 @@ public static class Arma3Camera
             int I(int index) => int.Parse(fields[index], System.Globalization.CultureInfo.InvariantCulture);
             bool B(int index) => fields[index] == "1";
             return new Arma3GuardSample(D(0), fields[1], D(16), new Vec3(D(17), D(18), D(19)), D(20), fields[21],
-                B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture));
+                B(22), I(23), I(24), B(25), long.Parse(fields[26], System.Globalization.CultureInfo.InvariantCulture), B(27));
         }
         catch (FormatException) { return null; }
         catch (OverflowException) { return null; }
@@ -144,14 +144,14 @@ public static class Arma3Camera
         if (samples.Count == 0) return;
         using var writer = new StreamWriter(CaptureFolder.Raw(captureDir, "arma3_guard.csv"));
         writer.Write(Csv.Line(["t_qpc_ms", "game_fps", "player_x", "player_y", "player_z", "player_speed_mps",
-            "command_menu", "action_menu", "teammates_visible", "teammates_total", "player_alive", "guard_sample_id"]));
+            "command_menu", "action_menu", "teammates_visible", "teammates_total", "player_alive", "guard_sample_id", "esc_pressed"]));
         foreach (var sample in samples)
             writer.Write(Csv.Line([
                 Frames.FormatDouble(sample.TQpcMs), Frames.FormatDouble(sample.GameFps),
                 Frames.FormatDouble(sample.PlayerPosition.X), Frames.FormatDouble(sample.PlayerPosition.Y),
                 Frames.FormatDouble(sample.PlayerPosition.Z), Frames.FormatDouble(sample.PlayerSpeedMps),
                 sample.CommandMenu, sample.ActionMenu ? "1" : "0", sample.VisibleTeammates.ToString(),
-                sample.TotalTeammates.ToString(), sample.PlayerAlive ? "1" : "0", sample.SampleId.ToString(),
+                sample.TotalTeammates.ToString(), sample.PlayerAlive ? "1" : "0", sample.SampleId.ToString(), sample.EscPressed ? "1" : "0",
             ]));
     }
 
