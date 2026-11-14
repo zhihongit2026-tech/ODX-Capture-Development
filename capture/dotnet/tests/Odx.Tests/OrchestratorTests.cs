@@ -259,7 +259,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
         var fine = record.Players.Single(p => p.PlayerId == "fine");
         Assert.Equal(CaptureReport.Ok, fine.Verdict);
         Assert.Empty(fine.Problems!);
-        Assert.Equal("round m2-r01: saved, check · SLOW: degraded, encoder behind: 435 frames dropped, 97 % duplicated", AgentClient.RoundSummary(record));
+        Assert.Equal("round m2-r01: saved, check · SLOW: degraded (1416/7000 frames), encoder behind: 435 frames dropped, 97 % duplicated", AgentClient.RoundSummary(record));
         var status = await RoomStatus();
         Assert.All(status["members"]!.AsArray(), m => Assert.Null(m!["problem"]));
     }
