@@ -20,6 +20,11 @@
         <SolidColorBrush x:Key="LineBrush" Color="#1B607D" />
         <SolidColorBrush x:Key="CyanBrush" Color="#16D9F4" />
         <SolidColorBrush x:Key="MutedBrush" Color="#8DAFC3" />
+        <LinearGradientBrush x:Key="ActiveNavBackground" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#08708A" Offset="0" />
+            <GradientStop Color="#06435A" Offset="0.52" />
+            <GradientStop Color="#052D45" Offset="1" />
+        </LinearGradientBrush>
 
         <Style TargetType="{x:Type Label}">
             <Setter Property="Foreground" Value="#D6E8F5" />
@@ -493,7 +498,7 @@
                     <TextBlock Text="WORKSPACE" Foreground="#86AFC3" FontSize="13"
                                FontWeight="Bold" Margin="10,0,0,23" />
                     <Button x:Name="NavDashboard" Style="{StaticResource NavigationButton}"
-                            Background="#06435A" BorderBrush="#20D9EF" Click="NavigateDashboard_Click">
+                            Background="{StaticResource ActiveNavBackground}" BorderBrush="#20D9EF" Click="NavigateDashboard_Click">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="42" />
@@ -635,6 +640,13 @@
                                         </Rectangle>
                                         <Border HorizontalAlignment="Left" Width="1" Background="#28728B"
                                                 Margin="-17,0,0,0" />
+                                        <Canvas HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                                                Width="210" IsHitTestVisible="False" Opacity="0.28">
+                                            <Path Data="M 130,0 L 185,0 L 95,180 L 40,180 Z"
+                                                  Fill="#087C9C" Opacity="0.28" />
+                                            <Path Data="M 185,0 L 210,0 L 120,180 L 95,180 Z"
+                                                  Fill="#12B8CF" Opacity="0.24" />
+                                        </Canvas>
                                         <TextBlock x:Name="StatusText" AutomationProperties.AutomationId="StatusText"
                                                    TextWrapping="Wrap" Foreground="#E6F3FB"
                                                    FontSize="14.5" LineHeight="19"
