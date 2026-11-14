@@ -35,8 +35,7 @@ public class CaptureReportTests
         var report = Report(frames: 5000, round: null, failure: "capture stopped unexpectedly")
             .RequireMinimumFrames(7000);
         Assert.Equal(CaptureReport.Failed, report.Verdict);
-        Assert.Contains("capture stopped unexpectedly", report.Problems());
-        Assert.Contains("video frames below required minimum: 5000/7000", report.Problems());
+        Assert.Contains("capture stopped unexpectedly; video frames below required minimum: 5000/7000", report.Problems());
     }
 
     [Fact]
