@@ -49,23 +49,37 @@ public sealed class ResourceGuardTests
     }
 
     [Fact]
-    public void Gpu_3d_alert_does_not_use_recorder_fps_or_trigger_at_game_fps_50()
+    public void Gpu_3d_alert_does_not_trigger_at_game_fps_30()
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
         for (int i = 0; i <= 20; i++)
-            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 99, GameFps: 50), t.AddSeconds(i));
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 99, GameFps: 30), t.AddSeconds(i));
         Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D");
     }
 
     [Fact]
-    public void Gpu_3d_alert_requires_in_game_fps_below_50_and_uses_dwell_time()
+    public void Gpu_3d_alert_requires_in_game_fps_below_30_and_uses_dwell_time()
     {
         var guard = new ResourceGuard();
         var t = DateTime.UtcNow;
         for (int i = 0; i <= 5; i++)
-            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, GameFps: 49), t.AddSeconds(i));
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, GameFps: 29), t.AddSeconds(i));
         Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D" && a.Severity == QualityAlertSeverity.Critical);
+    }
+
+    [Fact]
+    public void Gpu_3d_alert_recovers_when_game_fps_returns_to_30_even_if_gpu_load_remains_high()
+    {
+        var guard = new ResourceGuard();
+        var t = DateTime.UtcNow;
+        for (int i = 0; i <= 5; i++)
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, GameFps: 29), t.AddSeconds(i));
+        Assert.Contains(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D");
+        for (int i = 6; i <= 11; i++)
+            guard.Observe(new ResourceSnapshot(20, 40, 60, Gpu3DPercent: 98, GameFps: 30), t.AddSeconds(i));
+        guard.Expire(t.AddSeconds(17));
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "RESOURCE_GPU_3D");
     }
 
     [Fact]
