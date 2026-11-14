@@ -736,6 +736,57 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.Contains("RECORD AGAIN", AgentClient.RoundSummary(record));
     }
 
+    [Fact]
+    public async Task Party_warning_from_one_member_is_broadcast_to_peers_through_protocol5_room_update()
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "party-alert-template"));
+        var (host, hostStarted, code) = await HostRoom("alert-host", template: template);
+        var (member, memberStarted) = Connect(template, "alert-member", code);
+        await WaitForAgents(2, code);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            if (room["members"]!.AsArray().All(m =>
+                (string?)m!["player_id"] == "alert-host" || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
+
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        var received = new TaskCompletionSource<QualityAlert[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomChanged += update =>
+        {
+            if (update?.CurrentSession != sessionId) return;
+            var remote = update.Members.SingleOrDefault(m => m.PlayerId == "alert-member");
+            if (AgentClient.TryReadPartyAlerts(remote?.Problem, sessionId!, out var warnings))
+                received.TrySetResult(warnings);
+        };
+
+        var localWarnings = new[]
+        {
+            new QualityAlert("ARMA3_GAME_FPS_LOW", QualityAlertSeverity.Warning, "FPS trong game dưới 50", "49 FPS"),
+            new QualityAlert("ARMA3_ESC_PRESSED", QualityAlertSeverity.Critical, "ESC pressed", "Stop the Party"),
+        };
+        Assert.True(await member.ReportAlertsAsync(sessionId!, localWarnings, default));
+        var synchronized = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, synchronized.Length);
+        Assert.Contains(synchronized, a => a.Code == "ARMA3_GAME_FPS_LOW");
+        Assert.Contains(synchronized, a => a.Code == "ARMA3_ESC_PRESSED");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
