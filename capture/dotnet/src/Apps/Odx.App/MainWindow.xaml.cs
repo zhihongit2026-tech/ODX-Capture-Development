@@ -771,8 +771,15 @@ public partial class MainWindow : Window
             if (member.Problem.StartsWith(guardPrefix, StringComparison.Ordinal))
             {
                 string code = member.Problem[guardPrefix.Length..];
+                var (title, detail) = code switch
+                {
+                    "ARMA3_ESC_PRESSED" => ("đã nhấn phím ESC", "Thành viên nhấn ESC trong lúc quay. Yêu cầu dừng đồng bộ và quay lại toàn bộ Party."),
+                    "ARMA3_CAMERA_MODE_CHANGED" => ("đã thay đổi góc nhìn", "Góc nhìn camera thay đổi trong lúc quay. Yêu cầu dừng đồng bộ và quay lại toàn bộ Party."),
+                    "ARMA3_COMMAND_MENU" => ("đã mở menu lệnh", "Menu lệnh Arma 3 xuất hiện trong lúc quay. Yêu cầu dừng đồng bộ và quay lại toàn bộ Party."),
+                    _ => ("đang có lỗi cần dừng lượt quay", code),
+                };
                 result.Add(new QualityAlert("PARTY_" + member.PlayerId + "_" + code, QualityAlertSeverity.Critical,
-                    (string.IsNullOrWhiteSpace(member.Name) ? member.PlayerId : member.Name) + ": yêu cầu dừng lượt quay", code));
+                    (string.IsNullOrWhiteSpace(member.Name) ? member.PlayerId : member.Name) + ": " + title, detail));
             }
             else if (member.Problem == AgentClient.FocusLostProblem(session))
             {
