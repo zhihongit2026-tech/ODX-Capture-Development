@@ -10,7 +10,6 @@ public sealed record QualityAlert(string Code, QualityAlertSeverity Severity, st
 /// </summary>
 public sealed class QualityGuard
 {
-    private const double FpsAlertFloor = 30.0;
     private const double FreezeWarningRatio = 0.80;
     private const double StarvedCriticalRatio = 0.25;
     private static readonly TimeSpan AlertHold = TimeSpan.FromSeconds(5);
@@ -19,7 +18,7 @@ public sealed class QualityGuard
     private readonly Dictionary<string, DateTime> _clearAfter = new(StringComparer.Ordinal);
     private RecorderStatus? _previous;
     private DateTime _previousAtUtc;
-    private int _lowFpsSamples, _freezeSamples, _starvedSamples, _noFrameSamples;
+    private int _freezeSamples, _starvedSamples, _noFrameSamples;
 
     public QualityGuard(double targetFps)
     {
@@ -29,7 +28,6 @@ public sealed class QualityGuard
 
     public IReadOnlyList<QualityAlert> Alerts => _alerts.Values.OrderByDescending(a => a.Severity).ThenBy(a => a.Code, StringComparer.Ordinal).ToArray();
 
-    public double? LastFreshFps { get; private set; }
     public double? LastEncoderStarvationPercent { get; private set; }
 
     /// <summary>Adds or refreshes an alert produced by an external guard (focus, input-method or resource monitoring).</summary>
@@ -50,10 +48,8 @@ public sealed class QualityGuard
         {
             _previous = status;
             _previousAtUtc = receivedAtUtc;
-            _lowFpsSamples = _freezeSamples = _starvedSamples = _noFrameSamples = 0;
-            LastFreshFps = null;
+            _freezeSamples = _starvedSamples = _noFrameSamples = 0;
             LastEncoderStarvationPercent = null;
-            ClearImmediate("FPS_DROP");
             ClearImmediate("VIDEO_FREEZE");
             ClearImmediate("VIDEO_STALLED");
             ClearImmediate("FFMPEG_BACKPRESSURE");
@@ -113,19 +109,9 @@ public sealed class QualityGuard
                     Clear("VIDEO_STALLED", receivedAtUtc);
                 }
                 long starved = Math.Max(0, status.Starved - _previous.Starved);
-                double freshFps = Math.Max(0, frames - duplicates) / elapsed;
                 double duplicateRatio = expected > 0 ? duplicates / expected : 0;
                 double starvedRatio = expected > 0 ? starved / expected : 0;
-                LastFreshFps = freshFps;
                 LastEncoderStarvationPercent = starvedRatio * 100.0;
-
-                if (freshFps < FpsAlertFloor)
-                {
-                    _lowFpsSamples++;
-                    Set(new QualityAlert("FPS_DROP", QualityAlertSeverity.Critical, "FPS dưới 30",
-                        $"Nguồn hình đạt khoảng {freshFps:0.#} FPS; ngưỡng yêu cầu tối thiểu là 30 FPS."));
-                }
-                else { _lowFpsSamples = 0; Clear("FPS_DROP", receivedAtUtc); }
 
                 if (duplicateRatio >= FreezeWarningRatio)
                 {
