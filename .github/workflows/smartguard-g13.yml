@@ -110,10 +110,11 @@ jobs:
 
           @(
             'ODX Capture 0.3.5 - Smart Guard G1.3 QA - Windows x64',
-            'Base: verified upstream ODX Capture 0.3.5 runtime. F10 and the 235-second auto-stop are retained.',
+            'Base: verified upstream ODX Capture 0.3.5 runtime. F10 and solo-capture timing are retained; Party Live rounds run for a synchronized 240 seconds from StartUtcMs.',
             'FPS: Arma 3 in-game diag_fps only. Below 50 FPS warns; below 45 FPS is critical after two 500 ms samples. Recorder/FFmpeg FPS never creates an FPS-drop alert.',
             'Party stop: ESC or camera-view change from any member of a four-player Party is relayed through existing Protocol 5 and the Host ToggleRound stop. All four takes must be recorded again.',
             'Party alerts: current warning/critical alert set is refreshed through Protocol 5 every three seconds (within the five-second synchronization target).',
+            'Party video gate: every member video is evaluated independently after finalization; at least 7000 finalized MP4 frames is PASS. Live frame progress is shown on each Smart Guard and synchronized to the Host.',
             'AI GUARD: independent overlay countdown remains visible for the full 235-second round when Windows confirms capture exclusion. OBS remains fail-closed because overlay exclusion is not guaranteed for every OBS capture path.',
             'Arma 3 Live preflight: the game window client area must be exactly 1280x720; other sizes or an unreadable/closed game window block Ready and Host Start Round.',
             'Arma 3 runtime: tools/OdxArma3.exe embeds the updated addon and odx_capture_x64.dll. Run it before launching Arma 3 so it installs the updated @OdxCapture files into the existing game folder.',
