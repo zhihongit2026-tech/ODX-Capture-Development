@@ -1,0 +1,81 @@
+name: Publish ODX Capture Smart Guard G1.3 official release
+
+on:
+  push:
+    branches: [release/odx-capture-g13-v0.3.5]
+    paths:
+      - .github/workflows/publish-smartguard-g13.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Download the exact PASS artifact from QA Run 58
+        uses: actions/download-artifact@v4
+        with:
+          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Windows-x64
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 43566927246
+          path: release-assets
+
+      - name: Verify the release package checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = 'release-assets/odx-capture-0.3.5-smartguard-g13-win-x64.zip'
+          $sums = 'release-assets/SHA256SUMS.txt'
+          if (-not (Test-Path $package)) { throw 'Verified QA package ZIP was not downloaded' }
+          if (-not (Test-Path $sums)) { throw 'QA SHA256SUMS.txt was not downloaded' }
+
+          $line = Select-String -Path $sums -Pattern '^package ZIP SHA256: ([A-Fa-f0-9]{64})$'
+          if ($null -eq $line) { throw 'Package ZIP SHA256 line is missing or malformed' }
+          $expected = $line.Matches[0].Groups[1].Value.ToUpperInvariant()
+          $actual = (Get-FileHash $package -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) { throw "Release checksum mismatch: expected $expected; got $actual" }
+          if ($actual -ne 'BA53E64E5A91B6A0E7BAEB8B3EF1FB5BAE05735D22A06CD95339404ED35E0478') {
+            throw "QA Run 58 package hash changed unexpectedly: $actual"
+          }
+          Write-Host "Verified official package SHA256: $actual"
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'smartguard-g1.3-v0.3.5'
+          gh release view $tag --repo $env:REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing to overwrite it" }
+
+          $notes = @'
+          ## ODX Capture 0.3.5 - Smart Guard G1.3 (Windows x64)
+
+          Official Windows x64 release of ODX Capture Smart Guard G1.3, built from source commit 6b8e08be50bbda6c606b1c05d2356c7e437c713f.
+
+          ### Verified CI results
+          - Full .NET solution build: PASS
+          - .NET regression: 326 passed, 4 skipped, 0 failed (330 total)
+          - Native extractor and Arma 3 extension build/tests: PASS
+          - OdxArma3 launcher build: PASS
+          - Windows x64 package assembly: PASS
+
+          ### Release provenance
+          - QA workflow run: https://github.com/zhihongit2026-tech/ODX-Capture-Development/actions/runs/43566927246
+          - Source commit: https://github.com/zhihongit2026-tech/ODX-Capture-Development/commit/6b8e08be50bbda6c606b1c05d2356c7e437c713f
+          - Package SHA-256: BA53E64E5A91B6A0E7BAEB8B3EF1FB5BAE05735D22A06CD95339404ED35E0478
+
+          ### Installation notes
+          Extract to a new folder. Copy the existing bin/odx-capture.json from the working installation into the new package to preserve the current orchestrator URL and access key. Do not overwrite existing data/, captures/, or previous takes. Keep the existing Protocol 5 server configuration.
+
+          AI Guard overlay capture exclusion is supported only where Windows confirms the exclusion; OBS remains fail-closed when exclusion cannot be guaranteed.
+          '@
+          Set-Content -Path release-notes.md -Value $notes -Encoding UTF8
+
+          $assets = @('release-assets/odx-capture-0.3.5-smartguard-g13-win-x64.zip','release-assets/SHA256SUMS.txt')
+          gh release create $tag $assets[0] $assets[1] --repo $env:REPOSITORY --target '6b8e08be50bbda6c606b1c05d2356c7e437c713f' --title 'ODX Capture 0.3.5 - Smart Guard G1.3 (Windows x64)' --notes-file release-notes.md --latest
