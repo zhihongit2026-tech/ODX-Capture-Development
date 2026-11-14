@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Odx.Core;
+using Odx.Protocol;
 
 namespace Odx.App;
 
