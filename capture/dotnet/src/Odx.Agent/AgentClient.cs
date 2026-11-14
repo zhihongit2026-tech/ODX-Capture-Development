@@ -369,16 +369,21 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     }
 
     /// <summary>
-    /// The existing Protocol 5 host-only stop is also requested immediately on the Host's own game-guard event.
-    /// Waiting for a reflected RoomUpdate can delay the stop; the session guard prevents double toggles.
+    /// Claims the one host stop for this exact active session. The session check and one-shot claim prevent a delayed
+    /// camera/ESC marker from toggling a later round into START.
     /// </summary>
+    private bool TryClaimHostSynchronizedStop(string session)
+    {
+        if (!IsHost || Room?.CurrentSession != session) return false;
+        string? previous = Volatile.Read(ref _focusStopRequestedSession);
+        if (previous == session) return false;
+        return Interlocked.CompareExchange(ref _focusStopRequestedSession, session, previous) == previous;
+    }
+
     private void RequestHostSynchronizedStop(string session, CancellationToken stop)
     {
-        if (!IsHost || Room?.CurrentSession != session) return;
-        string? previous = Volatile.Read(ref _focusStopRequestedSession);
-        if (previous == session) return;
-        if (Interlocked.CompareExchange(ref _focusStopRequestedSession, session, previous) != previous) return;
-        _ = Task.Run(() => StopPartyForFocusLossAsync(session, stop), stop);
+        if (TryClaimHostSynchronizedStop(session))
+            _ = Task.Run(() => StopPartyForFocusLossAsync(session, stop), stop);
     }
 
     private async Task StopPartyForFocusLossAsync(string session, CancellationToken stop)
@@ -489,9 +494,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             await SendAsync(new AgentState("recording", $"guard stop: {reason}", marker), stop);
             if (socket.State == WebSocketState.Open)
             {
-                // The Host ends the round immediately, without waiting for its own reflected
-                // RoomUpdate. Non-hosts trigger the same stop when their marker reaches the Host.
-                RequestHostSynchronizedStop(sessionId, stop);
+                // If this is the Host, await the Protocol 5 end-round command instead of fire-and-forget.
+                // A non-host stops its own invalid take immediately after the marker is sent; the Host receives
+                // that marker in RoomUpdate and ends the same live round for the remaining Party members.
+                if (IsHost && TryClaimHostSynchronizedStop(sessionId))
+                    await StopPartyForFocusLossAsync(sessionId, stop);
+                else if (!IsHost && code == "ARMA3_CAMERA_MODE_CHANGED")
+                    StopCapture();
+
                 _ = VerifyPartyStopAsync(sessionId, stop);
                 return true;
             }
