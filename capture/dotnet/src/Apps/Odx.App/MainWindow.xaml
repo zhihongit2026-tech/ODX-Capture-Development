@@ -676,7 +676,7 @@
                     </Grid.ColumnDefinitions>
 
                     <Border x:Name="CaptureCard" Grid.Column="0" Style="{StaticResource CardBorder}"
-                            Padding="30,16,25,16" Margin="0,0,8,0" MinHeight="214">
+                            Padding="42,16,25,16" Margin="0,0,8,0" MinHeight="214">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,15">
                                 <TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets"
@@ -687,9 +687,9 @@
                                            FontSize="12" FontWeight="Bold" Margin="20,4,0,0"
                                            VerticalAlignment="Center" />
                             </DockPanel>
-                            <Grid>
+                            <Grid Margin="42,0,0,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="150" />
+                                    <ColumnDefinition Width="112" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
@@ -751,7 +751,7 @@
                     </Border>
 
                     <Border x:Name="SettingsCard" Grid.Column="1" Style="{StaticResource CardBorder}"
-                            Padding="30,16,28,16" Margin="8,0,0,0" MinHeight="214">
+                            Padding="38,16,28,16" Margin="8,0,0,0" MinHeight="214">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,15">
                                 <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets"
@@ -759,9 +759,9 @@
                                 <TextBlock x:Name="SettingsTitleText" Text="CẤU HÌNH / PREFERENCES" Foreground="#F2FAFE"
                                            FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
                             </DockPanel>
-                            <Grid>
+                            <Grid Margin="47,0,0,0">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="145" />
+                                    <ColumnDefinition Width="116" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
@@ -791,7 +791,7 @@
 
                 <!-- Party / room control -->
                 <Border x:Name="PartyCard" Grid.Row="2" Style="{StaticResource CardBorder}"
-                        Padding="30,16,28,16" MinHeight="188">
+                        Padding="42,16,28,16" MinHeight="188">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="45" />
@@ -807,26 +807,26 @@
                                        FontSize="12" FontWeight="Bold" Margin="20,4,0,0"
                                        VerticalAlignment="Center" />
                         </DockPanel>
-                        <Grid x:Name="PlayerPanel" Grid.Row="1">
+                        <Grid x:Name="PlayerPanel" Grid.Row="1" Margin="8,0,0,0">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="166" />
                                 <ColumnDefinition Width="245" />
-                                <ColumnDefinition Width="75" />
+                                <ColumnDefinition Width="110" />
                                 <ColumnDefinition Width="245" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <Label x:Name="PlayerLabel" Grid.Column="0" Content="Mã người chơi" />
                             <TextBox x:Name="PlayerBox" AutomationProperties.AutomationId="PlayerBox"
                                      Grid.Column="1" HorizontalAlignment="Stretch" />
-                            <Label x:Name="NameLabel" Grid.Column="2" Content="Tên" Margin="18,0,12,0" />
+                            <Label x:Name="NameLabel" Grid.Column="2" Content="Tên" Margin="33,0,12,0" />
                             <TextBox x:Name="NameBox" AutomationProperties.AutomationId="NameBox"
                                      Grid.Column="3" HorizontalAlignment="Stretch" />
                         </Grid>
-                        <Grid x:Name="RoomPanel" Grid.Row="2">
+                        <Grid x:Name="RoomPanel" Grid.Row="2" Margin="8,0,0,0">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="190" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="134" />
+                                <ColumnDefinition Width="166" />
+                                <ColumnDefinition Width="89" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
@@ -835,7 +835,7 @@
                             </Grid.ColumnDefinitions>
                             <Label x:Name="RoomLabel" Grid.Column="0" Content="Room" />
                             <TextBox x:Name="RoomBox" AutomationProperties.AutomationId="RoomBox"
-                                     Grid.Column="1" Width="170" IsReadOnly="True" Visibility="Collapsed"
+                                     Grid.Column="1" Width="166" IsReadOnly="True" Visibility="Collapsed"
                                      FontFamily="Consolas" FontSize="16" FontWeight="Bold"
                                      HorizontalContentAlignment="Center" Foreground="#66F4FF"
                                      BorderBrush="#19D8ED" />
@@ -843,11 +843,11 @@
                                        Visibility="Collapsed" VerticalAlignment="Center"
                                        Foreground="#B6D0DE" FontSize="12" Margin="20,0,8,0" />
                             <TextBox x:Name="TaskBox" AutomationProperties.AutomationId="TaskBox"
-                                     Grid.Column="3" Width="220" Visibility="Collapsed"
+                                     Grid.Column="3" Width="236" Visibility="Collapsed"
                                      VerticalContentAlignment="Center" />
                             <Button x:Name="JoinButton" AutomationProperties.AutomationId="JoinButton"
                                     Grid.Column="4" Style="{StaticResource IconButton}" Tag="&#xE8B7;"
-                                    Click="Join_Click" Margin="12,3,4,3" Padding="20,9" />
+                                    Click="Join_Click" Margin="20,3,4,3" Padding="20,9" />
                             <Button x:Name="CreateButton" AutomationProperties.AutomationId="CreateButton"
                                     Grid.Column="5" Style="{StaticResource IconButton}" Tag="&#xE710;"
                                     Click="Create_Click" Margin="8,3,4,3" Padding="20,9" />
