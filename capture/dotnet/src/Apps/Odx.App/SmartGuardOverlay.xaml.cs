@@ -35,11 +35,11 @@ public partial class SmartGuardOverlay : Window
     {
         _processName = processName;
         _countdownEndsAtUtc = countdownEndsAtUtc;
-        UpdateCountdown();
         if (!IsLoaded) Show();
         Hide();
         _follow.Start();
         _countdown.Start();
+        UpdateCountdown();
         FollowTarget();
     }
 
@@ -48,7 +48,12 @@ public partial class SmartGuardOverlay : Window
         double remaining = Math.Max(0, (_countdownEndsAtUtc - DateTime.UtcNow).TotalSeconds);
         int seconds = (int)Math.Ceiling(remaining);
         CountdownText.Text = $"{seconds / 60:00}:{seconds % 60:00}";
-        if (seconds == 0) _countdown.Stop();
+        if (seconds == 0)
+        {
+            _countdown.Stop();
+            _follow.Stop();
+            Hide();
+        }
     }
 
     public void UpdateAlerts(IReadOnlyList<QualityAlert> alerts)
@@ -67,23 +72,43 @@ public partial class SmartGuardOverlay : Window
 
     private void FollowTarget()
     {
-        if (!_captureExcluded || string.IsNullOrWhiteSpace(_processName)) { Hide(); return; }
-        IntPtr target = IntPtr.Zero;
-        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_processName)))
+        if (!_captureExcluded || DateTime.UtcNow >= _countdownEndsAtUtc)
         {
-            using (process)
+            Hide();
+            _follow.Stop();
+            return;
+        }
+
+        IntPtr target = IntPtr.Zero;
+        if (!string.IsNullOrWhiteSpace(_processName))
+        {
+            foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_processName)))
             {
-                if (target == IntPtr.Zero && process.MainWindowHandle != IntPtr.Zero)
-                    target = process.MainWindowHandle;
+                using (process)
+                {
+                    if (target == IntPtr.Zero && process.MainWindowHandle != IntPtr.Zero)
+                        target = process.MainWindowHandle;
+                }
             }
         }
-        if (target == IntPtr.Zero) { Hide(); return; }
-        if (!GetWindowRect(target, out var r) || r.Right <= r.Left || r.Bottom <= r.Top) { Hide(); return; }
-        IntPtr foreground = GetForegroundWindow();
-        if (foreground != target && GetAncestor(foreground, 2) != target) { Hide(); return; }
-        Left = r.Right - ActualWidth - 18;
-        Top = r.Top + 18;
-        if (!IsVisible) { Opacity = 1; Show(); }
+
+        if (target != IntPtr.Zero && GetWindowRect(target, out var r) && r.Right > r.Left && r.Bottom > r.Top)
+        {
+            Left = r.Right - ActualWidth - 18;
+            Top = r.Top + 18;
+        }
+        else
+        {
+            var area = SystemParameters.WorkArea;
+            Left = area.Right - ActualWidth - 18;
+            Top = area.Top + 18;
+        }
+
+        if (!IsVisible)
+        {
+            Opacity = 1;
+            Show();
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
