@@ -936,7 +936,13 @@
                                 <ComboBox x:Name="LanguageBox" AutomationProperties.AutomationId="LanguageBox"
                                           Grid.Row="0" Grid.Column="1" DisplayMemberPath="Name"
                                           SelectionChanged="Language_Changed" />
-                                <Label x:Name="HotkeyLabel" Grid.Row="1" Content="Phím tắt bật" />
+                                <Label x:Name="HotkeyLabel" Grid.Row="1" Content="Phím tắt bật">
+                                    <Label.ContentTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                                        </DataTemplate>
+                                    </Label.ContentTemplate>
+                                </Label>
                                 <TextBox x:Name="HotkeyBox" AutomationProperties.AutomationId="HotkeyBox"
                                          Grid.Row="1" Grid.Column="1" IsReadOnly="True"
                                          IsReadOnlyCaretVisible="False" GotKeyboardFocus="Hotkey_GotFocus"
