@@ -719,7 +719,7 @@ public partial class MainWindow : Window
                     SetStatus(_ => requested.Reason);
                     // A standalone capture has no Host to issue a Protocol 5 round stop.
                     // End it immediately for every mandatory game-guard stop, including ESC and camera changes.
-                    if (solo && (requested.Code is "ARMA3_COMMAND_MENU" or "ARMA3_ESC_PRESSED" or "ARMA3_CAMERA_MODE_CHANGED") &&
+                    if (solo && Arma3GuardEvaluator.StopsStandaloneCapture(requested.Code) &&
                         (_state is RunState.Starting or RunState.Recording))
                         StopRecording();
                 }));
