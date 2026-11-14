@@ -17,4 +17,12 @@ public sealed class PartyRoundRequirementsTests
         Assert.Equal(7000L, PartyRoundRequirements.MinimumVideoFrames);
         Assert.Equal(7200L, (long)(PartyRoundRequirements.LiveDuration.TotalSeconds * 30));
     }
+
+    [Fact]
+    public void Shared_deadline_is_converted_using_the_measured_reference_clock_offset()
+    {
+        const double roundStartUtcMs = 1_000_000;
+        DateTime deadline = PartyRoundRequirements.LocalDeadlineUtc(roundStartUtcMs, referenceOffsetMs: 125);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1_239_875).UtcDateTime, deadline);
+    }
 }
