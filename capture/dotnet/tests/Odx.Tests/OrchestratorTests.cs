@@ -776,7 +776,7 @@ public sealed class OrchestratorTests : IAsyncLifetime
 
         var localWarnings = new[]
         {
-            new QualityAlert("ARMA3_GAME_FPS_LOW", QualityAlertSeverity.Warning, "FPS trong game dưới 30", "29 FPS"),
+            new QualityAlert("ARMA3_GAME_FPS_LOW", QualityAlertSeverity.Warning, "FPS trong game dưới 50", "49 FPS"),
             new QualityAlert("ARMA3_ESC_PRESSED", QualityAlertSeverity.Critical, "ESC pressed", "Stop the Party"),
         };
         Assert.True(await member.ReportAlertsAsync(sessionId!, localWarnings, default));
