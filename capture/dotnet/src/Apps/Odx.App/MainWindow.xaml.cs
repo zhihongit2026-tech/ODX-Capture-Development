@@ -739,9 +739,13 @@ public partial class MainWindow : Window
             ? gameGuard.GameAlerts : Array.Empty<QualityAlert>();
         // Game-guard violations may also appear in QualityGuard as external alerts.
         // Show each code once rather than duplicating ESC and camera stop warnings.
-        return (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts)
+        var local = (_qualityGuard?.Alerts ?? []).Concat(_resourceAlerts).Concat(gameAlerts)
             .GroupBy(alert => alert.Code, StringComparer.Ordinal)
-            .Select(group => group.OrderByDescending(alert => alert.Severity).First()).ToArray();
+            .Select(group => group.OrderByDescending(alert => alert.Severity).First());
+        // The Host must be able to distinguish its own issue from a teammate's issue by player name.
+        if (_room is not null && !string.IsNullOrWhiteSpace(_settings.PlayerName))
+            local = local.Select(alert => alert with { Title = _settings.PlayerName.Trim() + ": " + alert.Title });
+        return local.ToArray();
     }
 
     private QualityAlert[] CurrentPartyGuardAlerts(RoomUpdate? update = null)
@@ -761,7 +765,7 @@ public partial class MainWindow : Window
                     result.Add(alert with
                     {
                         Code = "PARTY_" + member.PlayerId + "_" + alert.Code,
-                        Title = member.Name + ": " + alert.Title,
+                        Title = (string.IsNullOrWhiteSpace(member.Name) ? member.PlayerId : member.Name) + ": " + alert.Title,
                     });
                 continue;
             }
@@ -771,17 +775,17 @@ public partial class MainWindow : Window
             {
                 string code = member.Problem[guardPrefix.Length..];
                 result.Add(new QualityAlert("PARTY_" + member.PlayerId + "_" + code, QualityAlertSeverity.Critical,
-                    member.Name + ": yêu cầu dừng lượt quay", code));
+                    (string.IsNullOrWhiteSpace(member.Name) ? member.PlayerId : member.Name) + ": yêu cầu dừng lượt quay", code));
             }
             else if (member.Problem == AgentClient.FocusLostProblem(session))
             {
                 result.Add(new QualityAlert("PARTY_" + member.PlayerId + "_FOCUS_LOST", QualityAlertSeverity.Critical,
-                    member.Name + ": mất focus game", "Thành viên đã Alt+Tab hoặc cửa sổ game mất focus."));
+                    (string.IsNullOrWhiteSpace(member.Name) ? member.PlayerId : member.Name) + ": mất focus game", "Thành viên đã Alt+Tab hoặc cửa sổ game mất focus."));
             }
             else if (!member.Problem.StartsWith("ODX_", StringComparison.Ordinal))
             {
                 result.Add(new QualityAlert("PARTY_" + member.PlayerId + "_RECORDING_PROBLEM", QualityAlertSeverity.Warning,
-                    member.Name + ": lỗi ghi hình", member.Problem));
+                    (string.IsNullOrWhiteSpace(member.Name) ? member.PlayerId : member.Name) + ": lỗi ghi hình", member.Problem));
             }
         }
         return result.ToArray();
