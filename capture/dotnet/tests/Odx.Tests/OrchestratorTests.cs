@@ -736,6 +736,74 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.Contains("RECORD AGAIN", AgentClient.RoundSummary(record));
     }
 
+    [Theory]
+    [InlineData("ARMA3_ESC_PRESSED", 1, true)]
+    [InlineData("ARMA3_CAMERA_MODE_CHANGED", 1, true)]
+    [InlineData("ARMA3_ESC_PRESSED", 2, false)]
+    [InlineData("ARMA3_CAMERA_MODE_CHANGED", 2, false)]
+    public async Task Game_guard_stop_ends_active_round_even_when_host_room_is_not_yet_four_players(
+        string code, int partySize, bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "small-party-guard-template"));
+        var validReport = new CaptureReport(1416, 1416, 30, 0, 0, 0, true, "process", CaptureReport.Aligned, 0, null, null);
+        FakeCapture.Reports["guard-short-host"] = validReport;
+        FakeCapture.Reports["guard-short-member"] = validReport;
+
+        var (host, hostStarted, roomCode) = await HostRoom("guard-short-host", template: template);
+        var members = partySize == 2
+            ? new[] { Connect(template, "guard-short-member", roomCode) }
+            : Array.Empty<(AgentClient Agent, TaskCompletionSource Started)>();
+        await WaitForAgents(partySize, roomCode);
+        foreach (var member in members)
+            await member.Agent.SetReadyAsync(true, default);
+
+        for (int i = 0; i < 100 && members.Any(m => m.Agent.Room?.Members.Any(p => p.PlayerId == "guard-short-member" && p.Ready) != true); i++)
+            await Task.Delay(50);
+
+        var recorded = new TaskCompletionSource<RoundRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files =>
+            recorded.TrySetResult(JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!);
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(new[] { hostStarted.Task }.Concat(members.Select(m => m.Started.Task)))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        bool recording = false;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(roomCode);
+            if (room["current_session"] is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording"))
+            {
+                recording = true;
+                break;
+            }
+            await Task.Delay(50);
+        }
+        Assert.True(recording, "The guard stop must be tested only after recording has begun.");
+
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomChanged += update =>
+        {
+            if (update is { CurrentSession: null }) ended.TrySetResult();
+        };
+
+        string reporter = hostTriggers ? "guard-short-host" : "guard-short-member";
+        FakeCapture.Instances[reporter].RequestGuardStop(
+            new Arma3GuardStop(code, "RETAKE_REQUIRED: " + code + " during active recording."));
+
+        // The active round must end promptly via the existing Protocol 5 Host ToggleRound,
+        // not wait for Auto235 or for the room to reach exactly four players.
+        await ended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal(partySize, result.Players.Count);
+        Assert.NotNull(result.EndUtcMs);
+        Assert.All(result.Players, player =>
+        {
+            Assert.Equal(CaptureReport.Failed, player.Verdict ?? string.Empty);
+            Assert.Contains("RETAKE_REQUIRED", player.Report?.Failure ?? string.Empty);
+        });
+    }
+
     [Fact]
     public async Task Party_warning_from_one_member_is_broadcast_to_peers_through_protocol5_room_update()
     {
