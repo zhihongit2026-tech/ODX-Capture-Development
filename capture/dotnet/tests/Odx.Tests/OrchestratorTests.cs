@@ -916,6 +916,51 @@ public sealed class OrchestratorTests : IAsyncLifetime
         Assert.Equal(record.EndUtcMs, memberTimes.End);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CameraModeChangeFromAnyPartyMemberEndsTheLiveRoundForTheWholeParty(bool hostTriggers)
+    {
+        string template = SessionFixtures.MakeValidSession(Path.Combine(_root, "camera-stop-template"));
+        var (host, hostStarted, code) = await HostRoom("p1", template: template);
+        var (member, memberStarted) = Connect(template, "p2", code);
+        await WaitForAgents(2, code);
+        await member.SetReadyAsync(true, default);
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            if (room["members"]!.AsArray().All(m => (string?)m!["player_id"] == "p1" || (bool?)m!["ready"] == true)) break;
+            await Task.Delay(50);
+        }
+
+        var recorded = new TaskCompletionSource<RoundFiles>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _coordinator.RoundRecorded += files => recorded.TrySetResult(files);
+        await host.ToggleRoundAsync(0, default);
+        await Task.WhenAll(hostStarted.Task, memberStarted.Task).WaitAsync(TimeSpan.FromSeconds(10));
+
+        string? sessionId = null;
+        for (int i = 0; i < 100; i++)
+        {
+            var room = await RoomStatus(code);
+            sessionId = (string?)room["current_session"];
+            if (sessionId is not null &&
+                room["members"]!.AsArray().All(m => (string?)m!["state"] == "recording")) break;
+            await Task.Delay(50);
+        }
+        Assert.NotNull(sessionId);
+
+        AgentClient reporter = hostTriggers ? host : member;
+        Assert.True(await reporter.ReportGuardStopAsync(sessionId!, "ARMA3_CAMERA_MODE_CHANGED",
+            "camera changed INTERNAL -> EXTERNAL", default));
+
+        var files = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        var record = JsonSerializer.Deserialize<RoundRecord>(files.Round, AgentMessage.Json)!;
+        Assert.Equal("player_stop:p1", record.EndReason);
+        Assert.NotNull(record.EndUtcMs);
+        Assert.Equal(2, record.Players.Count);
+        Assert.All(record.Players, player => Assert.NotNull(player.StopReason));
+    }
+
     [Fact]
     public async Task TheHostsGameChoosesTheRoomsProfileForEveryMemberAndRound()
     {
