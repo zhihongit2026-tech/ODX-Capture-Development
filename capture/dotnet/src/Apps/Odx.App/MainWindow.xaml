@@ -793,6 +793,11 @@
                 <Border x:Name="PartyCard" Grid.Row="2" Style="{StaticResource CardBorder}"
                         Padding="42,16,28,16" MinHeight="188">
                     <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="45" />
+                            <RowDefinition Height="52" />
+                            <RowDefinition Height="52" />
+                        </Grid.RowDefinitions>
                         <Canvas Grid.RowSpan="3" HorizontalAlignment="Right" VerticalAlignment="Stretch"
                                 Width="260" IsHitTestVisible="False" Opacity="0.25">
                             <Path Data="M 150,0 L 235,0 L 110,190 L 25,190 Z"
@@ -800,11 +805,6 @@
                             <Path Data="M 220,0 L 260,0 L 135,190 L 95,190 Z"
                                   Fill="#16C5D5" Opacity="0.20" />
                         </Canvas>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="45" />
-                            <RowDefinition Height="52" />
-                            <RowDefinition Height="52" />
-                        </Grid.RowDefinitions>
                         <DockPanel Grid.Row="0" Margin="8,0,0,8">
                             <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets"
                                        Foreground="#22E7F6" FontSize="26" Margin="0,0,18,0" />
