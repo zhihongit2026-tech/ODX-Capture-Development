@@ -37,6 +37,11 @@
                            HorizontalAlignment="Right" />
             </Grid>
 
+            <TextBlock x:Name="FramesText" Margin="0,6,0,0"
+                       Text="FRAMES 0 / 7,000 · CHƯA ĐẠT"
+                       Foreground="#FFFFD166" FontSize="10" FontWeight="Bold"
+                       TextWrapping="Wrap" />
+
             <ScrollViewer Margin="0,7,0,0" MaxHeight="300"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
