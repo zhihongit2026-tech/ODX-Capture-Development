@@ -276,6 +276,38 @@
             </Setter>
         </Style>
 
+        <Style x:Key="IconButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border x:Name="IconButtonBorder" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" Margin="13,1">
+                                <TextBlock Text="{TemplateBinding Tag}" FontFamily="Segoe MDL2 Assets"
+                                           FontSize="15" Foreground="#35E4F5"
+                                           VerticalAlignment="Center" Margin="0,0,9,0" />
+                                <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="IconButtonBorder" Property="BorderBrush" Value="#2BE3FA" />
+                                <Setter TargetName="IconButtonBorder" Property="Background" Value="#10415B" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="IconButtonBorder" Property="Background" Value="#062238" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="IconButtonBorder" Property="Opacity" Value="0.42" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="PrimaryActionButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Background">
                 <Setter.Value>
@@ -667,7 +699,7 @@
                                 <Label x:Name="SourceLabel" Grid.Row="0" Content="Nguồn quay" />
                                 <ComboBox x:Name="SourceBox" AutomationProperties.AutomationId="SourceBox"
                                           Grid.Row="0" Grid.Column="1" DisplayMemberPath="Label" />
-                                <Button x:Name="RefreshButton" Grid.Row="0" Grid.Column="2"
+                                <Button x:Name="RefreshButton" Grid.Row="0" Grid.Column="2" Style="{StaticResource IconButton}" Tag="&#xE72C;"
                                         Click="Refresh_Click" Padding="15,7" Margin="10,3,0,3">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets"
@@ -707,8 +739,8 @@
                                                  Width="125" />
                                 </StackPanel>
                                 <Button x:Name="ObsTestButton" AutomationProperties.AutomationId="ObsTestButton"
-                                        Grid.Row="4" Grid.Column="2" Click="ObsTest_Click"
-                                        Padding="13,8" Margin="10,3,0,3" />
+                                        Grid.Row="4" Grid.Column="2" Style="{StaticResource IconButton}" Tag="&#xE9CE;"
+                                        Click="ObsTest_Click" Padding="13,8" Margin="10,3,0,3" />
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -783,7 +815,7 @@
                                      Grid.Column="1" HorizontalAlignment="Stretch" />
                             <Label x:Name="NameLabel" Grid.Column="2" Content="Tên" Margin="18,0,12,0" />
                             <TextBox x:Name="NameBox" AutomationProperties.AutomationId="NameBox"
-                                     Grid.Column="3" Width="100%" HorizontalAlignment="Stretch" />
+                                     Grid.Column="3" HorizontalAlignment="Stretch" />
                         </Grid>
                         <Grid x:Name="RoomPanel" Grid.Row="2">
                             <Grid.ColumnDefinitions>
@@ -809,12 +841,14 @@
                                      Grid.Column="3" Width="220" Visibility="Collapsed"
                                      VerticalContentAlignment="Center" />
                             <Button x:Name="JoinButton" AutomationProperties.AutomationId="JoinButton"
-                                    Grid.Column="4" Click="Join_Click" Margin="12,3,4,3" Padding="20,9" />
+                                    Grid.Column="4" Style="{StaticResource IconButton}" Tag="&#xE8B7;"
+                                    Click="Join_Click" Margin="12,3,4,3" Padding="20,9" />
                             <Button x:Name="CreateButton" AutomationProperties.AutomationId="CreateButton"
-                                    Grid.Column="5" Click="Create_Click" Margin="8,3,4,3" Padding="20,9" />
+                                    Grid.Column="5" Style="{StaticResource IconButton}" Tag="&#xE710;"
+                                    Click="Create_Click" Margin="8,3,4,3" Padding="20,9" />
                             <Button x:Name="SyncClockButton" AutomationProperties.AutomationId="SyncClockButton"
-                                    Grid.Column="6" Visibility="Collapsed" Click="SyncClock_Click"
-                                    Margin="8,3,4,3" Padding="18,9" />
+                                    Grid.Column="6" Style="{StaticResource IconButton}" Tag="&#xE823;"
+                                    Visibility="Collapsed" Click="SyncClock_Click" Margin="8,3,4,3" Padding="18,9" />
                         </Grid>
                     </Grid>
                 </Border>
