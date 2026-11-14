@@ -19,6 +19,27 @@ public class CaptureReportTests
     }
 
     [Fact]
+    public void Party_video_passes_only_at_7000_finalized_frames()
+    {
+        Assert.Equal(CaptureReport.Ok, Report(frames: 7000, round: null).RequireMinimumFrames(7000).Verdict);
+        Assert.Equal(CaptureReport.Ok, Report(frames: 7200, round: null).RequireMinimumFrames(7000).Verdict);
+
+        var below = Report(frames: 6999, round: null).RequireMinimumFrames(7000);
+        Assert.Equal(CaptureReport.Failed, below.Verdict);
+        Assert.Contains("video frames below required minimum: 6999/7000", below.Problems());
+    }
+
+    [Fact]
+    public void Minimum_frame_failure_is_added_without_overwriting_an_existing_failure()
+    {
+        var report = Report(frames: 5000, round: null, failure: "capture stopped unexpectedly")
+            .RequireMinimumFrames(7000);
+        Assert.Equal(CaptureReport.Failed, report.Verdict);
+        Assert.Contains("capture stopped unexpectedly", report.Problems());
+        Assert.Contains("video frames below required minimum: 5000/7000", report.Problems());
+    }
+
+    [Fact]
     public void A_given_up_last_frame_keeps_the_round_degraded_up_to_3_s_of_stand_in_frames()
     {
         const string note = "the capture callback did not let go within 2 s (in 'readback')";
