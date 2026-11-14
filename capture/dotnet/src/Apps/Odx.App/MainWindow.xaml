@@ -770,7 +770,7 @@
                                        FontSize="12" FontWeight="Bold" Margin="20,4,0,0"
                                        VerticalAlignment="Center" />
                         </DockPanel>
-                        <Grid Grid.Row="1">
+                        <Grid x:Name="PlayerPanel" Grid.Row="1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="180" />
                                 <ColumnDefinition Width="245" />
@@ -780,17 +780,17 @@
                             </Grid.ColumnDefinitions>
                             <Label x:Name="PlayerLabel" Grid.Column="0" Content="Mã người chơi" />
                             <TextBox x:Name="PlayerBox" AutomationProperties.AutomationId="PlayerBox"
-                                     Grid.Column="1" Width="100%" HorizontalAlignment="Stretch" />
+                                     Grid.Column="1" HorizontalAlignment="Stretch" />
                             <Label x:Name="NameLabel" Grid.Column="2" Content="Tên" Margin="18,0,12,0" />
                             <TextBox x:Name="NameBox" AutomationProperties.AutomationId="NameBox"
                                      Grid.Column="3" Width="100%" HorizontalAlignment="Stretch" />
                         </Grid>
-                        <Grid Grid.Row="2">
+                        <Grid x:Name="RoomPanel" Grid.Row="2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="180" />
                                 <ColumnDefinition Width="190" />
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="250" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
