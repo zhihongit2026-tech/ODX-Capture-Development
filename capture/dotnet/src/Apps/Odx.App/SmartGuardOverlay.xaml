@@ -4,7 +4,7 @@
         Title="ODX Smart Guard" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
         SizeToContent="WidthAndHeight" WindowStartupLocation="Manual" IsHitTestVisible="False">
-    <Border Background="#D91A1E27" BorderBrush="#665B6472" BorderThickness="1" CornerRadius="9" Padding="12,9" MaxWidth="390">
+    <Border Background="#D91A1E27" BorderBrush="#665B6472" BorderThickness="1" CornerRadius="9" Padding="12,9" MaxWidth="500">
         <StackPanel>
             <DockPanel>
                 <TextBlock Text="ODX SMART GUARD" Foreground="#FFB8C7D9" FontSize="11" FontWeight="Bold" />
@@ -14,16 +14,20 @@
                 <TextBlock Text="TIME LEFT" Foreground="#FF8F9BAA" FontSize="9" FontWeight="SemiBold" />
                 <TextBlock x:Name="StateText" DockPanel.Dock="Right" Foreground="#FF64D98B" FontSize="10" FontWeight="Bold" Text="MONITORING" />
             </DockPanel>
-            <ItemsControl x:Name="AlertList" Margin="0,6,0,0">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <StackPanel Margin="0,3,0,0">
-                            <TextBlock Text="{Binding Title}" Foreground="{Binding Brush}" FontWeight="SemiBold" FontSize="13"/>
-                            <TextBlock Text="{Binding Detail}" Foreground="#FFE0E6ED" FontSize="11" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <ScrollViewer Margin="0,6,0,0" MaxHeight="360"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="AlertList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,3,0,0">
+                                <TextBlock Text="{Binding Title}" Foreground="{Binding Brush}" FontWeight="SemiBold" FontSize="13" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Detail}" Foreground="#FFE0E6ED" FontSize="11" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
         </StackPanel>
     </Border>
 </Window>
