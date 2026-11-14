@@ -3,8 +3,6 @@
 // which is refreshed every rendered frame so the menu guard reacts as quickly as the game renders.
 if (!hasInterface) exitWith {};
 
-#include "\\a3\\ui_f\\hpp\\definedikcodes.inc"
-
 ODX_guardSampleAt = -1;
 ODX_guardSampleId = 0;
 ODX_guardFps = 0;
@@ -22,7 +20,8 @@ ODX_guardEscPressed = false;
         private _display = findDisplay 46;
         private _eh = _display displayAddEventHandler ["KeyDown", {
             params ["_display", "_key", "_shift", "_ctrl", "_alt"];
-            if (_key isEqualTo DIK_ESC) then { ODX_guardEscPressed = true; };
+            // Arma 3 KeyDown uses DIK_ESCAPE = 0x01. Use the numeric code to avoid a fragile UI_F include dependency.
+            if (_key isEqualTo 1) then { ODX_guardEscPressed = true; };
             false
         }];
         waitUntil { sleep 0.1; isNull _display };
