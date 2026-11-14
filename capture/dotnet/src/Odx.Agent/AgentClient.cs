@@ -1021,10 +1021,14 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     public static string RoundSummary(RoundRecord record)
     {
         var bad = record.Players.Where(p => p.Verdict is not CaptureReport.Ok).ToList();
-        if (bad.Count == 0) return $"round {record.SessionId}: all ok";
+        if (bad.Count == 0)
+            return $"round {record.SessionId}: all ok · " +
+                   string.Join(" · ", record.Players.Select(p =>
+                       $"{p.Name}: {p.Report?.Frames ?? 0}/{PartyRoundRequirements.MinimumVideoFrames} frames PASS"));
         bool again = bad.Any(p => p.Verdict == CaptureReport.Failed);
         return $"round {record.SessionId}: {(again ? "RECORD AGAIN" : "saved, check")} · " +
                string.Join(" · ", bad.Select(p => $"{p.Name}: {p.Verdict ?? "not done"}" +
+                                                  $" ({p.Report?.Frames ?? 0}/{PartyRoundRequirements.MinimumVideoFrames} frames)" +
                                                   (p.Problems is { Count: > 0 } problems ? $", {string.Join("; ", problems)}" : "")));
     }
 
