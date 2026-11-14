@@ -331,7 +331,7 @@
                                       HorizontalAlignment="Left" Stretch="Fill" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
                                             VerticalAlignment="Center">
-                                    <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets"
+                                    <TextBlock Text="{TemplateBinding Tag}" FontFamily="Segoe MDL2 Assets"
                                                FontSize="34" Foreground="#72F9FF"
                                                VerticalAlignment="Center" Margin="0,0,18,0" />
                                     <ContentPresenter VerticalAlignment="Center"
@@ -499,6 +499,9 @@
                                FontWeight="Bold" Margin="10,0,0,23" />
                     <Button x:Name="NavDashboard" Style="{StaticResource NavigationButton}"
                             Background="{StaticResource ActiveNavBackground}" BorderBrush="#20D9EF" Click="NavigateDashboard_Click">
+                        <Button.Effect>
+                            <DropShadowEffect Color="#00D9F5" BlurRadius="17" ShadowDepth="0" Opacity="0.34" />
+                        </Button.Effect>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="42" />
