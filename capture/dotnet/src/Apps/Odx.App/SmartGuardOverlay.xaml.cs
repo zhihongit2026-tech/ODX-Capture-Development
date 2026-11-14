@@ -92,7 +92,7 @@ public partial class SmartGuardOverlay : Window
             }
         }
 
-        if (target != IntPtr.Zero && GetWindowRect(target, out var r) && r.Right > r.Left && r.Bottom > r.Top)
+        if (target != IntPtr.Zero && !IsIconic(target) && GetWindowRect(target, out var r) && r.Right > r.Left && r.Bottom > r.Top)
         {
             Left = r.Right - ActualWidth - 18;
             Top = r.Top + 18;
@@ -129,4 +129,5 @@ public partial class SmartGuardOverlay : Window
     [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr hwnd, int index);
     [DllImport("user32.dll")] private static extern int SetWindowLongW(IntPtr hwnd, int index, int value);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
 }
