@@ -933,9 +933,10 @@ public partial class MainWindow : Window
         RefreshSmartGuardOverlay();
         SyncPartyGuardAlerts(localAlerts);
         ScheduleResourceSample(guard);
-        if (localAlerts.Length > 0)
+        var actionable = localAlerts.Where(a => a.Severity != QualityAlertSeverity.Info).ToArray();
+        if (actionable.Length > 0)
         {
-            string message = string.Join(" | ", localAlerts.Select(a => a.Title + ": " + a.Detail));
+            string message = string.Join(" | ", actionable.Select(a => a.Title + ": " + a.Detail));
             SetStatus(_ => message);
         }
     }
