@@ -11,7 +11,7 @@ namespace Odx.App;
 
 public sealed record GuardAlertView(string Title, string Detail, Brush Brush);
 
-/// <summary>Independent click-through overlay, kept visible until the round's 235-second deadline when capture exclusion is confirmed.</summary>
+/// <summary>Independent click-through overlay, kept visible until the synchronized 240-second Party deadline when capture exclusion is confirmed.</summary>
 public partial class SmartGuardOverlay : Window
 {
     private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
@@ -56,6 +56,13 @@ public partial class SmartGuardOverlay : Window
         }
     }
 
+    public void UpdateFrameCount(long frames)
+    {
+        bool passed = frames >= PartyRoundRequirements.MinimumVideoFrames;
+        FramesText.Text = $"FRAMES {frames:N0} / {PartyRoundRequirements.MinimumVideoFrames:N0} · {(passed ? "PASS" : "CHƯA ĐẠT")}";
+        FramesText.Foreground = passed ? Brushes.LightGreen : Brushes.Gold;
+    }
+
     public void UpdateAlerts(IReadOnlyList<QualityAlert> alerts)
     {
         AlertList.ItemsSource = alerts
@@ -66,7 +73,9 @@ public partial class SmartGuardOverlay : Window
              a.Severity == QualityAlertSeverity.Warning ? "WARNING · " : "") + a.Title,
             a.Detail,
             a.Severity == QualityAlertSeverity.Critical ? Brushes.OrangeRed :
-            a.Severity == QualityAlertSeverity.Warning ? Brushes.Gold : Brushes.LightGreen)).ToArray();
+            a.Severity == QualityAlertSeverity.Warning ? Brushes.Gold :
+            a.Code == "ODX_VIDEO_FRAMES" && !a.Detail.Contains("PASS", StringComparison.OrdinalIgnoreCase)
+                ? Brushes.Gold : Brushes.LightGreen)).ToArray();
         bool critical = alerts.Any(a => a.Severity == QualityAlertSeverity.Critical);
         bool warning = alerts.Any(a => a.Severity == QualityAlertSeverity.Warning);
         StateText.Text = critical ? "ACTION REQUIRED" : warning ? "WARNING" : "MONITORING";
