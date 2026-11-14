@@ -61,6 +61,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
     private string? _runSessionId, _startingSessionId, _stopReason, _focusLostSessionId, _focusStopRequestedSession;
     private string? _guardStopSessionId, _guardStopProblem, _retakeRequiredSessionId, _retakeRequiredReason;
     private string? _partyAlertsSessionId, _partyAlertsProblem, _lastSentPartyAlertsProblem;
+    private DateTime _lastPartyAlertsSentAtUtc = DateTime.MinValue;
     private CancellationTokenSource? _stopBeforeStart;
     private string? _roomCode = options.RoomCode?.Trim().ToUpperInvariant();
     private string? _lanNetwork;
@@ -509,7 +510,8 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                     : _run?.Problem;
 
             if (_partyAlertsSessionId == sessionId &&
-                string.Equals(_lastSentPartyAlertsProblem, problem, StringComparison.Ordinal))
+                string.Equals(_lastSentPartyAlertsProblem, problem, StringComparison.Ordinal) &&
+                (problem is null || DateTime.UtcNow - _lastPartyAlertsSentAtUtc < TimeSpan.FromSeconds(4)))
                 return true;
 
             _partyAlertsSessionId = sessionId;
@@ -523,7 +525,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             {
                 if (_partyAlertsSessionId == sessionId &&
                     string.Equals(_partyAlertsProblem, problem, StringComparison.Ordinal))
+                {
                     _lastSentPartyAlertsProblem = problem;
+                    _lastPartyAlertsSentAtUtc = DateTime.UtcNow;
+                }
             }
             return true;
         }
@@ -534,7 +539,10 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             {
                 if (_partyAlertsSessionId == sessionId &&
                     string.Equals(_partyAlertsProblem, problem, StringComparison.Ordinal))
+                {
                     _lastSentPartyAlertsProblem = null; // next one-second poll retries the update
+                    _lastPartyAlertsSentAtUtc = DateTime.MinValue;
+                }
             }
             return false;
         }
@@ -719,6 +727,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                     _partyAlertsSessionId = null;
                     _partyAlertsProblem = null;
                     _lastSentPartyAlertsProblem = null;
+                    _lastPartyAlertsSentAtUtc = DateTime.MinValue;
                     _retakeRequiredSessionId = null;
                     _retakeRequiredReason = null;
                     _stopBeforeStart = CancellationTokenSource.CreateLinkedTokenSource(stop);
@@ -864,7 +873,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
                 _runSessionId = null;
                 if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
                 if (_guardStopSessionId == s.SessionId) { _guardStopSessionId = null; _guardStopProblem = null; }
-                if (_partyAlertsSessionId == s.SessionId) { _partyAlertsSessionId = null; _partyAlertsProblem = null; _lastSentPartyAlertsProblem = null; }
+                if (_partyAlertsSessionId == s.SessionId) { _partyAlertsSessionId = null; _partyAlertsProblem = null; _lastSentPartyAlertsProblem = null; _lastPartyAlertsSentAtUtc = DateTime.MinValue; }
                 if (_retakeRequiredSessionId == s.SessionId) { _retakeRequiredSessionId = null; _retakeRequiredReason = null; }
             }
             string aside = MoveAside(result.SessionDir, "cancelled") ?? result.SessionDir;
@@ -887,7 +896,7 @@ public sealed class AgentClient(AgentOptions options, Func<CaptureOptions, ICapt
             _runSessionId = null;
             if (_focusLostSessionId == s.SessionId) _focusLostSessionId = null;
             if (_guardStopSessionId == s.SessionId) { _guardStopSessionId = null; _guardStopProblem = null; }
-            if (_partyAlertsSessionId == s.SessionId) { _partyAlertsSessionId = null; _partyAlertsProblem = null; _lastSentPartyAlertsProblem = null; }
+            if (_partyAlertsSessionId == s.SessionId) { _partyAlertsSessionId = null; _partyAlertsProblem = null; _lastSentPartyAlertsProblem = null; _lastPartyAlertsSentAtUtc = DateTime.MinValue; }
             if (_retakeRequiredSessionId == s.SessionId) { _retakeRequiredSessionId = null; _retakeRequiredReason = null; }
         }
     }
