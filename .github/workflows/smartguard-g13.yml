@@ -1,8 +1,8 @@
-name: ODX Smart Guard G1.3 - Windows x64 QA (Protocol 5)
+name: ODX Smart Guard G1.3 Dashboard Reference - Windows x64 QA (Protocol 5)
 
 on:
   push:
-    branches: [feature/smart-ai-guard-g13-gamefps-party-esc-countdown]
+    branches: [feature/odx-g13-dashboard-reference-ui]
   workflow_dispatch:
 
 concurrency:
@@ -76,7 +76,7 @@ jobs:
             throw 'OdxArma3.exe missing'
           }
 
-      - name: Assemble complete ODX 0.3.5 Smart Guard G1.3 Windows x64 QA package
+      - name: Assemble ODX 0.3.5 Smart Guard G1.3 Dashboard Reference QA package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -109,7 +109,7 @@ jobs:
           $config | ConvertTo-Json -Depth 8 | Set-Content -Path $configFile -Encoding utf8
 
           @(
-            'ODX Capture 0.3.5 - Smart Guard G1.3 QA - Windows x64',
+            'ODX Capture 0.3.5 - Smart Guard G1.3 Dashboard Reference QA - Windows x64',
             'Base: verified upstream ODX Capture 0.3.5 runtime. F10 and solo-capture timing are retained; Party Live rounds run for a synchronized 240 seconds from StartUtcMs.',
             'FPS: Arma 3 in-game diag_fps only. Below 50 FPS warns; below 45 FPS is critical after two 500 ms samples. Recorder/FFmpeg FPS never creates an FPS-drop alert.',
             'Party stop: ESC or camera-view change from any member of a four-player Party is relayed through existing Protocol 5 and the Host ToggleRound stop. All four takes must be recorded again.',
@@ -123,14 +123,50 @@ jobs:
             'Extract to a new folder for QA. Do not overwrite the working installation or existing data/, captures/ and previous takes.'
           ) | Set-Content -Path (Join-Path $original 'README-SMART-GUARD-G13.txt') -Encoding UTF8
 
-          $dest = 'odx-capture-0.3.5-smartguard-g13-win-x64'
+          $dest = 'odx-capture-0.3.5-smartguard-g13-dashboard-win-x64'
           Move-Item $original $dest
           $required = @('Odx Capture.exe','bin/odx-app.exe','bin/odx.exe','bin/ffmpeg/ffmpeg.exe','tools/OdxArma3.exe','bin/odx-capture.json')
           foreach ($rel in $required) {
             if (-not (Test-Path (Join-Path $dest $rel))) { throw "QA package missing $rel" }
           }
 
-          Compress-Archive -Path "$dest/*" -DestinationPath "$dest.zip" -CompressionLevel Optimal
+          # Preserve empty data directories as real directory entries for Windows Explorer.
+          foreach ($rel in @('data','data/captures','data/delivery','data/logs')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $dest $rel) | Out-Null
+          }
+
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = "$dest.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          $rootPath = [IO.Path]::GetFullPath($dest)
+          $zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
+          try {
+            foreach ($folder in (Get-ChildItem -LiteralPath $dest -Directory -Recurse -Force | Sort-Object FullName)) {
+              $relative = [IO.Path]::GetRelativePath($rootPath, $folder.FullName).Replace('\','/') + '/'
+              $entry = $zip.CreateEntry($relative)
+              $entry.ExternalAttributes = [int][IO.FileAttributes]::Directory
+            }
+            foreach ($file in (Get-ChildItem -LiteralPath $dest -File -Recurse -Force)) {
+              $relative = [IO.Path]::GetRelativePath($rootPath, $file.FullName).Replace('\','/')
+              [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $file.FullName, $relative, [IO.Compression.CompressionLevel]::Optimal
+              ) | Out-Null
+            }
+          }
+          finally { $zip.Dispose() }
+
+          # Fail the build if Explorer-compatible directory entries are missing.
+          $checkZip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            foreach ($rel in @('data/','data/captures/','data/delivery/','data/logs/')) {
+              $entry = $checkZip.GetEntry($rel)
+              if ($null -eq $entry -or (($entry.ExternalAttributes -band [int][IO.FileAttributes]::Directory) -eq 0)) {
+                throw "Package ZIP is missing a Windows directory entry: $rel"
+              }
+            }
+          }
+          finally { $checkZip.Dispose() }
           $exeHash = (Get-FileHash (Join-Path $dest 'bin/odx-app.exe') -Algorithm SHA256).Hash
           $launcherHash = (Get-FileHash (Join-Path $dest 'tools/OdxArma3.exe') -Algorithm SHA256).Hash
           $zipHash = (Get-FileHash "$dest.zip" -Algorithm SHA256).Hash
@@ -142,9 +178,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Windows-x64
+          name: ODX-Capture-0.3.5-SmartGuard-G1.3-Dashboard-Reference-Windows-x64
           path: |
-            odx-capture-0.3.5-smartguard-g13-win-x64.zip
+            odx-capture-0.3.5-smartguard-g13-dashboard-win-x64.zip
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

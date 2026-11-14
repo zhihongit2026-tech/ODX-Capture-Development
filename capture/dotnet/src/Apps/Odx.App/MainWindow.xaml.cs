@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Odx.Agent;
@@ -126,6 +127,7 @@ public partial class MainWindow : Window
         NameBox.Text = _settings.PlayerName;
         var roomRows = _config.Orchestrator is null ? Visibility.Collapsed : Visibility.Visible;
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
+        PartyCard.Visibility = NavParty.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
         _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); };
@@ -145,8 +147,83 @@ public partial class MainWindow : Window
         if (configError is not null) SetStatus(t => t.ConfigInvalid(configError));
     }
 
+    // Window chrome controls preserve the existing tray, close and restore lifecycle.
+    private void WindowMinimize_Click(object sender, RoutedEventArgs e) =>
+        SystemCommands.MinimizeWindow(this);
+
+    private void WindowMaximize_Click(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    private void WindowClose_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void SetActiveNavigation(Button active)
+    {
+        foreach (var item in new[] { NavDashboard, NavCapture, NavParty, NavSettings })
+        {
+            item.Background = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(6, 26, 41));
+            item.BorderBrush = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(6, 26, 41));
+        }
+
+        active.Background = new System.Windows.Media.LinearGradientBrush(
+            System.Windows.Media.Color.FromRgb(7, 73, 93),
+            System.Windows.Media.Color.FromRgb(4, 39, 59), 90);
+        active.BorderBrush = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(32, 217, 239));
+        active.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            Color = System.Windows.Media.Color.FromRgb(0, 217, 245),
+            BlurRadius = 17,
+            ShadowDepth = 0,
+            Opacity = 0.34,
+        };
+    }
+
+    // Dashboard navigation only changes the visible scroll position; all existing controls and handlers remain active.
+    private void NavigateDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavDashboard);
+        DashboardScroll.ScrollToVerticalOffset(0);
+    }
+
+    private void NavigateCapture_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavCapture);
+        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, CaptureCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
+            + DashboardScroll.VerticalOffset));
+    }
+
+    private void NavigateParty_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavParty);
+        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, PartyCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
+            + DashboardScroll.VerticalOffset));
+    }
+
+    private void NavigateSettings_Click(object sender, RoutedEventArgs e)
+    {
+        SetActiveNavigation(NavSettings);
+        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, SettingsCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
+            + DashboardScroll.VerticalOffset));
+    }
+
     private void ApplyLanguage()
     {
+        WorkspaceTitleText.Text = _t.Workspace;
+        NavDashboardText.Text = _t.NavOverview;
+        NavCaptureText.Text = _t.NavCapture;
+        NavPartyText.Text = _t.NavParty;
+        NavSettingsText.Text = _t.NavSettings;
+        DashboardTitleText.Text = _t.DashboardTitle;
+        CaptureTitleText.Text = _t.CaptureTitle;
+        SettingsTitleText.Text = _t.SettingsTitle;
+        PartyTitleText.Text = _t.PartyTitle;
+        HotkeyHelpText.Text = _t.HotkeyHelp;
+        AiGuardHelpText.Text = _t.AiGuardHelp;
         LanguageLabel.Content = _t.Language;
         SourceLabel.Content = _t.Source;
         GameLabel.Content = _t.GameProfile;
@@ -211,6 +288,8 @@ public partial class MainWindow : Window
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
+        if (MaximizeButton?.Content is System.Windows.Controls.TextBlock maximizeIcon)
+            maximizeIcon.Text = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
         if (WindowState == WindowState.Minimized) Hide();
     }
 
@@ -376,6 +455,9 @@ public partial class MainWindow : Window
         else if (_run is not null && !_clock.IsEnabled) _clock.Start();
         if (state is RunState.Idle or RunState.Stopping) CancelAutoStop();
         bool idle = state == RunState.Idle;
+        StartStopButton.Tag = state == RunState.Countdown ? "\uE711" :
+            state == RunState.Stopping || state == RunState.Starting || state == RunState.Recording ||
+            state == RunState.Agent && _agent?.Room?.CurrentSession is not null ? "\uE71A" : "\uE768";
         StartStopButton.Content = state switch
         {
             RunState.Idle => _t.Start,
@@ -415,8 +497,9 @@ public partial class MainWindow : Window
         CreateButton.Content = inRoom ? _t.CloseRoom : _t.CreateRoom;
         CreateButton.IsEnabled = idle || inRoom && _agent!.IsHost;
         CreateButton.Visibility = inRoom && !_agent!.IsHost ? Visibility.Collapsed : Visibility.Visible;
-        // In a room the host's game (chosen here before opening it) and the orchestrator's frame rate apply.
-        GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = inRoom ? Visibility.Collapsed : Visibility.Visible;
+        // Keep the selected game profile and FPS visible as read-only context in a room.
+        // The host's game and orchestrator's frame rate remain authoritative; the existing IsEnabled rules prevent edits.
+        GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
     }
