@@ -133,6 +133,10 @@ public sealed partial class MatchCoordinator(OrchestratorOptions options, int ti
             case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) && room.Current is null && SessionIdBusy(sid):
                 effects.Sends.Add((link, new RoomError($"task id '{sid}' is still being recorded or saved; wait or use another")));
                 break;
+            case ToggleRound { SessionId: { } sid } when room is not null && room.IsHost(link) &&
+                                                        room.Current is { } active && active.Record.SessionId != sid:
+                effects.Sends.Add((link, new RoomError($"stale stop ignored: active round is {active.Record.SessionId}, not {sid}")));
+                break;
             case ToggleRound t when room is not null && room.IsHost(link):
                 Apply(room, room.Current is null
                     ? new JsonObject { ["type"] = GameEvents.RoundStart, ["countdown_ms"] = t.CountdownMs, ["by"] = link.Id, ["session_id"] = t.SessionId }
