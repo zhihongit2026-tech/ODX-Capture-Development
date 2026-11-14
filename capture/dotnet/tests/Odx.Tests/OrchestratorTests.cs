@@ -588,6 +588,29 @@ public sealed class OrchestratorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SessionScopedAutoStopCannotEndANewerRound()
+    {
+        var (host, hostStarted, code) = await HostRoom("timer-host");
+        await WaitForAgents(1, code);
+
+        await host.ToggleRoundAsync(0, default, "live-round-01");
+        await hostStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("live-round-01", (string?)(await RoomStatus(code))["current_session"]);
+
+        var refused = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RoomError += message => refused.TrySetResult(message);
+        await host.ToggleRoundAsync(0, default, "stale-round-00");
+
+        Assert.Contains("stale stop ignored", await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("live-round-01", (string?)(await RoomStatus(code))["current_session"]);
+
+        await host.ToggleRoundAsync(0, default, "live-round-01");
+        for (int i = 0; i < 100 && (await RoomStatus(code))["current_session"] is not null; i++)
+            await Task.Delay(50);
+        Assert.Null((await RoomStatus(code))["current_session"]);
+    }
+
+    [Fact]
     public async Task HostStartsRoundWithCountdownOnEveryPlayerAndEndsIt()
     {
         var (_, hostStarted, code) = await HostRoom("p1");
