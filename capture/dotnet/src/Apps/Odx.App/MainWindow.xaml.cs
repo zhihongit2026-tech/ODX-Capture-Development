@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -24,6 +25,12 @@ public sealed record GameItem(string Label, string? Path, string? WindowProcess 
 {
     public override string ToString() => Label;
 }
+
+/// <summary>One player's live recorder frame count, or a waiting row until telemetry arrives.</summary>
+public sealed record FrameMetricItem(string Name, string RoleText, string FramesText, string DetailText, double ProgressValue, bool HasData);
+
+/// <summary>One member currently present in the Protocol 5 room and their actual Ready state.</summary>
+public sealed record PartyMemberViewItem(string Name, string RoleText, string ReadyText, bool IsReady);
 
 /// <summary>What the OBS test found: OBS's output against spec v3 §2 (1080p target, 720p/30 floor).</summary>
 public sealed record ObsCheck(string Version, int Width, int Height, double Fps, bool Recording)
@@ -92,6 +99,8 @@ public partial class MainWindow : Window
     /// <summary>The last round's outcome for the status line; null before any.</summary>
     private Func<Strings, string>? _roundResult;
     private readonly ElevatedPackets _packets = new();
+    private string? _lastFramesSignature, _lastPartyRosterSignature, _dashboardFrameSessionId;
+    private readonly Dictionary<string, long> _partyFrameCache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Idle → Countdown → Starting (odx record warming up) → Recording → Stopping (incl. build + validate) → Idle.
@@ -127,10 +136,10 @@ public partial class MainWindow : Window
         NameBox.Text = _settings.PlayerName;
         var roomRows = _config.Orchestrator is null ? Visibility.Collapsed : Visibility.Visible;
         PlayerLabel.Visibility = PlayerPanel.Visibility = RoomLabel.Visibility = RoomPanel.Visibility = roomRows;
-        PartyCard.Visibility = NavParty.Visibility = roomRows;
+        PartyPage.Visibility = NavParty.Visibility = roomRows;
         Loaded += async (_, _) => await RefreshWindowsAsync();
         Loaded += async (_, _) => await CheckEncoderAsync();
-        _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); };
+        _clock.Tick += (_, _) => { ShowRecordingStatus(); PollQualityGuard(); RefreshDashboardMonitor(); };
         _preflightTimer.Tick += (_, _) => CheckRoomPreflight();
         _preflightTimer.Start();
 
@@ -144,6 +153,7 @@ public partial class MainWindow : Window
         _tray.DoubleClick += (_, _) => RestoreFromTray();
         _tray.Visible = true;
         ApplyLanguage();
+        RefreshDashboardMonitor();
         if (configError is not null) SetStatus(t => t.ConfigInvalid(configError));
     }
 
@@ -163,53 +173,33 @@ public partial class MainWindow : Window
     {
         foreach (var item in new[] { NavDashboard, NavCapture, NavParty, NavSettings })
         {
-            item.Background = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(6, 26, 41));
-            item.BorderBrush = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(6, 26, 41));
+            item.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(6, 26, 41));
+            item.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(6, 26, 41));
+            item.Effect = null;
         }
-
         active.Background = new System.Windows.Media.LinearGradientBrush(
-            System.Windows.Media.Color.FromRgb(7, 73, 93),
-            System.Windows.Media.Color.FromRgb(4, 39, 59), 90);
-        active.BorderBrush = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromRgb(32, 217, 239));
+            System.Windows.Media.Color.FromRgb(7, 73, 93), System.Windows.Media.Color.FromRgb(4, 39, 59), 90);
+        active.BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(32, 217, 239));
         active.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            Color = System.Windows.Media.Color.FromRgb(0, 217, 245),
-            BlurRadius = 17,
-            ShadowDepth = 0,
-            Opacity = 0.34,
+            Color = System.Windows.Media.Color.FromRgb(0, 217, 245), BlurRadius = 17, ShadowDepth = 0, Opacity = 0.34,
         };
     }
 
-    // Dashboard navigation only changes the visible scroll position; all existing controls and handlers remain active.
-    private void NavigateDashboard_Click(object sender, RoutedEventArgs e)
+    private void ShowWorkspacePage(FrameworkElement page, Button navigation)
     {
-        SetActiveNavigation(NavDashboard);
-        DashboardScroll.ScrollToVerticalOffset(0);
+        OverviewPage.Visibility = ReferenceEquals(page, OverviewPage) ? Visibility.Visible : Visibility.Collapsed;
+        CapturePage.Visibility = ReferenceEquals(page, CapturePage) ? Visibility.Visible : Visibility.Collapsed;
+        PartyPage.Visibility = ReferenceEquals(page, PartyPage) ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPage.Visibility = ReferenceEquals(page, SettingsPage) ? Visibility.Visible : Visibility.Collapsed;
+        SetActiveNavigation(navigation);
+        DashboardScroll.ScrollToTop();
     }
 
-    private void NavigateCapture_Click(object sender, RoutedEventArgs e)
-    {
-        SetActiveNavigation(NavCapture);
-        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, CaptureCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
-            + DashboardScroll.VerticalOffset));
-    }
-
-    private void NavigateParty_Click(object sender, RoutedEventArgs e)
-    {
-        SetActiveNavigation(NavParty);
-        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, PartyCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
-            + DashboardScroll.VerticalOffset));
-    }
-
-    private void NavigateSettings_Click(object sender, RoutedEventArgs e)
-    {
-        SetActiveNavigation(NavSettings);
-        DashboardScroll.ScrollToVerticalOffset(Math.Max(0, SettingsCard.TranslatePoint(new Point(0, 0), DashboardScroll).Y
-            + DashboardScroll.VerticalOffset));
-    }
+    private void NavigateDashboard_Click(object sender, RoutedEventArgs e) => ShowWorkspacePage(OverviewPage, NavDashboard);
+    private void NavigateCapture_Click(object sender, RoutedEventArgs e) => ShowWorkspacePage(CapturePage, NavCapture);
+    private void NavigateParty_Click(object sender, RoutedEventArgs e) => ShowWorkspacePage(PartyPage, NavParty);
+    private void NavigateSettings_Click(object sender, RoutedEventArgs e) => ShowWorkspacePage(SettingsPage, NavSettings);
 
     private void ApplyLanguage()
     {
@@ -224,6 +214,10 @@ public partial class MainWindow : Window
         PartyTitleText.Text = _t.PartyTitle;
         HotkeyHelpText.Text = _t.HotkeyHelp;
         AiGuardHelpText.Text = _t.AiGuardHelp;
+        FramesChartTitleText.Text = _t.FramesChartTitle;
+        FramesChartTargetText.Text = _t.FramesChartTarget;
+        PartyRosterTitleText.Text = _t.PartyRosterTitle;
+        PartyRosterSubtitleText.Text = _t.PartyRosterSubtitle;
         LanguageLabel.Content = _t.Language;
         SourceLabel.Content = _t.Source;
         GameLabel.Content = _t.GameProfile;
@@ -502,6 +496,7 @@ public partial class MainWindow : Window
         GameLabel.Visibility = GameBox.Visibility = FpsLabel.Visibility = FpsBox.Visibility = Visibility.Visible;
         RefreshButton.IsEnabled = idle;
         _tray.Text = idle ? "Odx Capture" : _t.TrayTooltip(_trayStartStop.Text);
+        RefreshDashboardMonitor();
     }
 
     private void BeginCountdown()
@@ -1163,6 +1158,100 @@ public partial class MainWindow : Window
         if (_closeWhenIdle) Close();
     }
 
+
+    /// <summary>Refresh the Overview using recorder frame counters and the existing Protocol 5 Party state.</summary>
+    private void RefreshDashboardMonitor(RoomUpdate? update = null)
+    {
+        update ??= _room?.Agent.Room;
+        var partyItems = update is null ? Array.Empty<PartyMemberViewItem>() :
+            update.Members.Select(member => new PartyMemberViewItem(
+                member.Name,
+                member.PlayerId == update.HostPlayerId ? _t.PartyHost :
+                    member.PlayerId == _room?.Agent.PlayerId ? _t.PartyYou : _t.PartyMember,
+                member.Ready ? _t.PartyReady : _t.PartyNotReady,
+                member.Ready)).ToArray();
+
+        string partySignature = string.Join("|", partyItems.Select(item => $"{item.Name}:{item.RoleText}:{item.ReadyText}:{item.IsReady}"));
+        if (!string.Equals(partySignature, _lastPartyRosterSignature, StringComparison.Ordinal))
+        {
+            PartyMembersItems.ItemsSource = partyItems;
+            _lastPartyRosterSignature = partySignature;
+        }
+        PartyMembersItems.Visibility = partyItems.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        PartyRosterEmptyText.Visibility = partyItems.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
+        PartyRosterEmptyText.Text = update is null ? _t.PartyRosterNotJoined : _t.PartyRosterNoMembers;
+        PartyRosterCountText.Text = update is null ? _t.PartyRosterNoMembers : _t.PartyRosterCount(partyItems.Length);
+
+        var frameItems = new List<FrameMetricItem>();
+        const long targetFrames = PartyRoundRequirements.MinimumVideoFrames;
+        if (update?.CurrentSession is { } session)
+        {
+            if (!string.Equals(_dashboardFrameSessionId, session, StringComparison.Ordinal))
+            {
+                _partyFrameCache.Clear();
+                _dashboardFrameSessionId = session;
+            }
+            foreach (var member in update.Members)
+            {
+                long? currentFrames = member.PlayerId == _room?.Agent.PlayerId
+                    ? _run?.LastStatus?.Frames
+                    : TryReadMemberFrames(member.Problem, session);
+                if (currentFrames is long received) _partyFrameCache[member.PlayerId] = received;
+                if (currentFrames is null && _partyFrameCache.TryGetValue(member.PlayerId, out long cached))
+                    currentFrames = cached;
+
+                bool hasData = currentFrames is long;
+                long frames = currentFrames ?? 0;
+                string detail = !hasData ? _t.FramesChartWaiting :
+                    frames >= targetFrames ? _t.FramesChartTargetReached : _t.FramesChartRemaining(targetFrames - frames);
+                string role = member.PlayerId == update.HostPlayerId ? _t.PartyHost :
+                    member.PlayerId == _room?.Agent.PlayerId ? _t.PartyYou : _t.PartyMember;
+                frameItems.Add(new FrameMetricItem(member.Name, role,
+                    hasData ? $"{frames.ToString("N0", CultureInfo.CurrentCulture)} / {targetFrames.ToString("N0", CultureInfo.CurrentCulture)}" : _t.FramesChartWaiting,
+                    detail, Math.Min(frames, targetFrames), hasData));
+            }
+        }
+        else if (_room is null && _run is not null)
+        {
+            long? currentFrames = _run.LastStatus?.Frames;
+            bool hasData = currentFrames is long;
+            long frames = currentFrames ?? 0;
+            string name = string.IsNullOrWhiteSpace(_settings.PlayerName) ? _t.LocalDevice : _settings.PlayerName.Trim();
+            string detail = !hasData ? _t.FramesChartWaiting :
+                frames >= targetFrames ? _t.FramesChartTargetReached : _t.FramesChartRemaining(targetFrames - frames);
+            frameItems.Add(new FrameMetricItem(name, _t.LocalCapture,
+                hasData ? $"{frames.ToString("N0", CultureInfo.CurrentCulture)} / {targetFrames.ToString("N0", CultureInfo.CurrentCulture)}" : _t.FramesChartWaiting,
+                detail, Math.Min(frames, targetFrames), hasData));
+        }
+
+        string frameSignature = string.Join("|", frameItems.Select(item =>
+            $"{item.Name}:{item.RoleText}:{item.FramesText}:{item.DetailText}:{item.ProgressValue}:{item.HasData}"));
+        if (!string.Equals(frameSignature, _lastFramesSignature, StringComparison.Ordinal))
+        {
+            FramesChartItems.ItemsSource = frameItems;
+            _lastFramesSignature = frameSignature;
+        }
+        FramesChartItems.Visibility = frameItems.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FramesChartEmptyText.Visibility = frameItems.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+        FramesChartEmptyText.Text = update?.CurrentSession is not null ? _t.FramesChartWaiting :
+            update is not null ? _t.FramesChartNoRound :
+            _run is null ? _t.FramesChartNoCapture : _t.FramesChartWaiting;
+        FramesChartCountText.Text = _t.FramesChartCount(frameItems.Count);
+    }
+
+    private static long? TryReadMemberFrames(string? problem, string sessionId)
+    {
+        if (!AgentClient.TryReadPartyAlerts(problem, sessionId, out var alerts)) return null;
+        var frameAlert = alerts.FirstOrDefault(alert => alert.Code == "ODX_VIDEO_FRAMES");
+        if (frameAlert is null) return null;
+        const string marker = "FRAMES";
+        int markerAt = frameAlert.Title.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        int slashAt = markerAt < 0 ? -1 : frameAlert.Title.IndexOf('/', markerAt + marker.Length);
+        if (markerAt < 0 || slashAt < 0) return null;
+        string digits = new(frameAlert.Title[(markerAt + marker.Length)..slashAt].Where(char.IsDigit).ToArray());
+        return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out long frames) ? frames : null;
+    }
+
     private void ShowRecordingStatus()
     {
         if (_run is null || _state is not (RunState.Recording or RunState.Agent)) return;
@@ -1228,7 +1317,9 @@ public partial class MainWindow : Window
         agent.Countdown += (ms, cancelled) => Dispatcher.BeginInvoke(() => ShowAgentCountdown(ms, cancelled));
         room.Changed += () => Dispatcher.BeginInvoke(() =>
         {
-            if (_room == room && _run is null && _state == RunState.Agent) ShowAgentStatus();
+            if (_room != room) return;
+            RefreshDashboardMonitor(room.Agent.Room);
+            if (_run is null && _state == RunState.Agent) ShowAgentStatus();
         });
         room.LanMissing += () => Dispatcher.BeginInvoke(() =>
         {
@@ -1268,6 +1359,7 @@ public partial class MainWindow : Window
             UpdateRoomAutoStop(room, update);
             if (_run is not null) RefreshSmartGuardOverlay(update);
             SetState(_state);
+            RefreshDashboardMonitor(update);
             if (_run is null) ShowAgentStatus();
         });
         agent.RoomError += error => Dispatcher.BeginInvoke(() =>
@@ -1434,6 +1526,7 @@ public partial class MainWindow : Window
                        (lan is null ? "" : "\n" + t.LanStatus(lan)) +
                        (packets is { } on ? "\n" + (on ? t.PacketsOn : t.PacketsOff) : "") + "\n" + log + "\n" +
                        (host ? t.HostHint(hotkey) : ready ? t.ReadyOn(hotkey) : t.ReadyHint(hotkey)));
+        RefreshDashboardMonitor(room);
     }
 
     private bool _syncingClock;
@@ -1546,6 +1639,7 @@ public partial class MainWindow : Window
             AttachGameGuard(run, solo: false);
             _clock.Start();
             ShowRecordingStatus();
+            RefreshDashboardMonitor();
         });
         run.CaptureStopped.ContinueWith(_ => Dispatcher.Invoke(() => ShowProcessingBadge(run)), TaskContinuationOptions.OnlyOnRanToCompletion);
         run.PhaseChanged += () => Dispatcher.BeginInvoke(() => ShowPhaseStatus(run));

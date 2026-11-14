@@ -392,6 +392,33 @@
                 </Setter.Value>
             </Setter>
         </Style>
+    
+        <Style x:Key="FramesProgressBar" TargetType="{x:Type ProgressBar}">
+            <Setter Property="Height" Value="13" />
+            <Setter Property="Background" Value="#061827" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ProgressBar}">
+                        <Grid x:Name="PART_Track" ClipToBounds="True">
+                            <Border Background="#061827" BorderBrush="#1B526B" BorderThickness="1" CornerRadius="6" />
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="6">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="#0B92AC" Offset="0" />
+                                        <GradientStop Color="#2CE6F5" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="PART_Indicator" Property="Opacity" Value="0.22" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Background="#03111E">
@@ -589,16 +616,12 @@
         <ScrollViewer x:Name="DashboardScroll" Grid.Row="2" Grid.Column="1"
                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       Background="#03111E">
-            <Grid Margin="18,17,20,18">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
 
-                <!-- Session command center -->
-                <Border x:Name="DashboardCard" Style="{StaticResource CardBorder}"
-                        Grid.Row="0" Padding="34,20,18,18" Margin="0,0,0,16"
+            <Grid x:Name="DashboardContent" Margin="18,17,20,18">
+                <Grid x:Name="OverviewPage" Visibility="Visible">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Border x:Name="DashboardCard" Style="{StaticResource CardBorder}"
+                        Padding="34,20,18,18" Margin="0,0,0,16"
                         MinHeight="270">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -667,16 +690,90 @@
                         </StackPanel>
                     </Grid>
                 </Border>
-
-                <!-- Capture and preferences cards -->
-                <Grid Grid.Row="1" Margin="0,0,0,16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1.48*" />
-                        <ColumnDefinition Width="1*" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border x:Name="CaptureCard" Grid.Column="0" Style="{StaticResource CardBorder}"
-                            Padding="42,16,25,16" Margin="0,0,8,0" MinHeight="214">
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="1.55*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
+                        <Border x:Name="FramesChartCard" Grid.Column="0" Style="{StaticResource CardBorder}"
+                                Padding="28,20,28,20" Margin="0,0,9,0" MinHeight="330">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="36" /><RowDefinition Height="26" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <DockPanel Grid.Row="0">
+                                    <TextBlock Text="&#xE9D2;" FontFamily="Segoe MDL2 Assets" Foreground="#27E2F3" FontSize="24" Margin="0,0,17,0" />
+                                    <TextBlock x:Name="FramesChartTitleText" Text="BIỂU ĐỒ FRAMES / TIẾN ĐỘ LIVE" Foreground="#F1F9FE" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="FramesChartCountText" DockPanel.Dock="Right" Text="0 người" Foreground="#8DB7CB" FontSize="11" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <TextBlock x:Name="FramesChartTargetText" Grid.Row="1" Text="MỤC TIÊU: 7.000 FRAME / THÀNH VIÊN" Foreground="#25D8EF" FontSize="11" FontWeight="Bold" Margin="41,0,0,0" VerticalAlignment="Center" />
+                                <Grid Grid.Row="2" Margin="0,9,0,0">
+                                    <ItemsControl x:Name="FramesChartItems" Visibility="Collapsed">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,7,0,9">
+                                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="13" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Row="0" Grid.Column="0">
+                                                        <TextBlock Text="{Binding Name}" Foreground="#EAF6FC" FontSize="13" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding RoleText}" Foreground="#72B6CD" FontSize="10" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FramesText}" Foreground="#D9F5FC" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                                    <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Minimum="0" Maximum="7000" Value="{Binding ProgressValue}" IsEnabled="{Binding HasData}" Style="{StaticResource FramesProgressBar}" Margin="0,8,0,0" />
+                                                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding DetailText}" Foreground="#8CAFC1" FontSize="10" Margin="0,5,0,0" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="FramesChartEmptyText" Text="Tham gia Party hoặc bắt đầu ghi hình để xem Frames." Foreground="#91B1C3" FontSize="13" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Border x:Name="PartyRosterCard" Grid.Column="1" Style="{StaticResource CardBorder}" Padding="25,20,24,20" Margin="9,0,0,0" MinHeight="330">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="36" /><RowDefinition Height="26" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <DockPanel Grid.Row="0">
+                                    <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets" Foreground="#27E2F3" FontSize="24" Margin="0,0,16,0" />
+                                    <TextBlock x:Name="PartyRosterTitleText" Text="THÀNH VIÊN PARTY" Foreground="#F1F9FE" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="PartyRosterCountText" DockPanel.Dock="Right" Text="0 thành viên" Foreground="#8DB7CB" FontSize="11" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <TextBlock x:Name="PartyRosterSubtitleText" Grid.Row="1" Text="TRẠNG THÁI SẴN SÀNG" Foreground="#25D8EF" FontSize="11" FontWeight="Bold" Margin="40,0,0,0" VerticalAlignment="Center" />
+                                <Grid Grid.Row="2" Margin="0,9,0,0">
+                                    <ItemsControl x:Name="PartyMembersItems" Visibility="Collapsed">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="#061B2B" BorderBrush="#1B4D65" BorderThickness="1" CornerRadius="9" Padding="12,10" Margin="0,0,0,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Name}" Foreground="#EAF6FC" FontSize="13" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding RoleText}" Foreground="#79B8CE" FontSize="10" Margin="0,3,0,0" />
+                                                        </StackPanel>
+                                                        <Border Grid.Column="1" CornerRadius="12" BorderThickness="1" Padding="10,5" VerticalAlignment="Center">
+                                                            <Border.Style>
+                                                                <Style TargetType="{x:Type Border}">
+                                                                    <Setter Property="Background" Value="#332A18" />
+                                                                    <Setter Property="BorderBrush" Value="#8A6A32" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsReady}" Value="True">
+                                                                            <Setter Property="Background" Value="#073B32" />
+                                                                            <Setter Property="BorderBrush" Value="#168B70" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <TextBlock Text="{Binding ReadyText}" Foreground="#F2F9FC" FontSize="10" FontWeight="Bold" />
+                                                        </Border>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="PartyRosterEmptyText" Text="Chưa tham gia Party. Tạo hoặc vào Room để xem danh sách thành viên." Foreground="#91B1C3" FontSize="13" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+                <Grid x:Name="CapturePage" Visibility="Collapsed"><Border x:Name="CaptureCard" Style="{StaticResource CardBorder}"
+                            Padding="42,16,25,16" Margin="0" MinHeight="214" MaxWidth="1180" HorizontalAlignment="Center">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,15">
                                 <TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets"
@@ -748,50 +845,9 @@
                                         Click="ObsTest_Click" Padding="13,8" Margin="10,3,0,3" />
                             </Grid>
                         </StackPanel>
-                    </Border>
-
-                    <Border x:Name="SettingsCard" Grid.Column="1" Style="{StaticResource CardBorder}"
-                            Padding="38,16,28,16" Margin="8,0,0,0" MinHeight="214">
-                        <StackPanel>
-                            <DockPanel Margin="0,0,0,15">
-                                <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets"
-                                           Foreground="#22E7F6" FontSize="25" Margin="0,0,22,0" />
-                                <TextBlock x:Name="SettingsTitleText" Text="CẤU HÌNH / PREFERENCES" Foreground="#F2FAFE"
-                                           FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
-                            </DockPanel>
-                            <Grid Margin="47,0,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="116" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="52" />
-                                    <RowDefinition Height="52" />
-                                </Grid.RowDefinitions>
-                                <Label x:Name="LanguageLabel" Grid.Row="0" Content="Ngôn ngữ" />
-                                <ComboBox x:Name="LanguageBox" AutomationProperties.AutomationId="LanguageBox"
-                                          Grid.Row="0" Grid.Column="1" DisplayMemberPath="Name"
-                                          SelectionChanged="Language_Changed" />
-                                <Label x:Name="HotkeyLabel" Grid.Row="1" Content="Phím tắt bật" />
-                                <TextBox x:Name="HotkeyBox" AutomationProperties.AutomationId="HotkeyBox"
-                                         Grid.Row="1" Grid.Column="1" IsReadOnly="True"
-                                         IsReadOnlyCaretVisible="False" GotKeyboardFocus="Hotkey_GotFocus"
-                                         LostKeyboardFocus="Hotkey_LostFocus"
-                                         PreviewKeyDown="Hotkey_PreviewKeyDown" />
-                            </Grid>
-                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets"
-                                           Foreground="#72C7DA" FontSize="15" Margin="0,0,9,0" />
-                                <TextBlock x:Name="HotkeyHelpText" Text="Hotkey có thể đổi bằng cách chọn ô và nhấn tổ hợp phím mới."
-                                           Foreground="#8DB2C6" FontSize="12" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                </Grid>
-
-                <!-- Party / room control -->
-                <Border x:Name="PartyCard" Grid.Row="2" Style="{StaticResource CardBorder}"
-                        Padding="42,16,28,16" MinHeight="188">
+                    </Border></Grid>
+                <Grid x:Name="PartyPage" Visibility="Collapsed"><Border x:Name="PartyCard" Style="{StaticResource CardBorder}"
+                        Padding="42,16,28,16" MinHeight="188" MaxWidth="1350" HorizontalAlignment="Center">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="45" />
@@ -854,7 +910,44 @@
                                     Visibility="Collapsed" Click="SyncClock_Click" Margin="8,3,4,3" Padding="18,9" />
                         </WrapPanel>
                     </Grid>
-                </Border>
+                </Border></Grid>
+                <Grid x:Name="SettingsPage" Visibility="Collapsed"><Border x:Name="SettingsCard" Style="{StaticResource CardBorder}"
+                            Padding="38,16,28,16" Margin="0" MinHeight="214" MaxWidth="900" HorizontalAlignment="Center">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,15">
+                                <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets"
+                                           Foreground="#22E7F6" FontSize="25" Margin="0,0,22,0" />
+                                <TextBlock x:Name="SettingsTitleText" Text="CẤU HÌNH / PREFERENCES" Foreground="#F2FAFE"
+                                           FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <Grid Margin="47,0,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="116" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="52" />
+                                    <RowDefinition Height="52" />
+                                </Grid.RowDefinitions>
+                                <Label x:Name="LanguageLabel" Grid.Row="0" Content="Ngôn ngữ" />
+                                <ComboBox x:Name="LanguageBox" AutomationProperties.AutomationId="LanguageBox"
+                                          Grid.Row="0" Grid.Column="1" DisplayMemberPath="Name"
+                                          SelectionChanged="Language_Changed" />
+                                <Label x:Name="HotkeyLabel" Grid.Row="1" Content="Phím tắt bật" />
+                                <TextBox x:Name="HotkeyBox" AutomationProperties.AutomationId="HotkeyBox"
+                                         Grid.Row="1" Grid.Column="1" IsReadOnly="True"
+                                         IsReadOnlyCaretVisible="False" GotKeyboardFocus="Hotkey_GotFocus"
+                                         LostKeyboardFocus="Hotkey_LostFocus"
+                                         PreviewKeyDown="Hotkey_PreviewKeyDown" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets"
+                                           Foreground="#72C7DA" FontSize="15" Margin="0,0,9,0" />
+                                <TextBlock x:Name="HotkeyHelpText" Text="Hotkey có thể đổi bằng cách chọn ô và nhấn tổ hợp phím mới."
+                                           Foreground="#8DB2C6" FontSize="12" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border></Grid>
             </Grid>
         </ScrollViewer>
 

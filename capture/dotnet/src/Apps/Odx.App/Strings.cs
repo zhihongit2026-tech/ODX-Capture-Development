@@ -37,6 +37,26 @@ public sealed class Strings
     public required string PartyTitle { get; init; }
     public required string HotkeyHelp { get; init; }
     public required string AiGuardHelp { get; init; }
+    public required string FramesChartTitle { get; init; }
+    public required string FramesChartTarget { get; init; }
+    public required string FramesChartNoCapture { get; init; }
+    public required string FramesChartNoRound { get; init; }
+    public required string FramesChartWaiting { get; init; }
+    public required string FramesChartTargetReached { get; init; }
+    public required Func<long, string> FramesChartRemaining { get; init; }
+    public required Func<int, string> FramesChartCount { get; init; }
+    public required string PartyRosterTitle { get; init; }
+    public required string PartyRosterSubtitle { get; init; }
+    public required string PartyRosterNotJoined { get; init; }
+    public required string PartyRosterNoMembers { get; init; }
+    public required Func<int, string> PartyRosterCount { get; init; }
+    public required string PartyReady { get; init; }
+    public required string PartyNotReady { get; init; }
+    public required string PartyHost { get; init; }
+    public required string PartyYou { get; init; }
+    public required string PartyMember { get; init; }
+    public required string LocalDevice { get; init; }
+    public required string LocalCapture { get; init; }
     public required string Language { get; init; }
     public required string Source { get; init; }
     public required string GameProfile { get; init; }
@@ -175,6 +195,26 @@ public sealed class Strings
         PartyTitle = "PARTY / ROOM",
         HotkeyHelp = "Select the field and press a new key combination.",
         AiGuardHelp = "AI Guard runs in its independent click-through overlay during supported recording sessions.",
+        FramesChartTitle = "FRAMES / LIVE PROGRESS",
+        FramesChartTarget = "TARGET: 7,000 FRAMES PER PLAYER",
+        FramesChartNoCapture = "Start a recording or join a Party to see live frame measurements.",
+        FramesChartNoRound = "No active round. Frame measurements appear when a round starts.",
+        FramesChartWaiting = "Waiting for live frame data…",
+        FramesChartTargetReached = "Minimum frame target reached",
+        FramesChartRemaining = remaining => $"{remaining:N0} frames to target",
+        FramesChartCount = count => $"{count} player(s)",
+        PartyRosterTitle = "PARTY MEMBERS",
+        PartyRosterSubtitle = "READY STATUS",
+        PartyRosterNotJoined = "No Party joined. Create or join a room to see its members.",
+        PartyRosterNoMembers = "No members",
+        PartyRosterCount = count => $"{count} member(s)",
+        PartyReady = "READY",
+        PartyNotReady = "NOT READY",
+        PartyHost = "HOST",
+        PartyYou = "YOU",
+        PartyMember = "MEMBER",
+        LocalDevice = "This PC",
+        LocalCapture = "LOCAL CAPTURE",
         Language = "Language",
         Source = "Source",
         GameProfile = "Game profile",
@@ -339,6 +379,26 @@ public sealed class Strings
         PartyTitle = "PARTY / ROOM",
         HotkeyHelp = "Có thể đổi phím tắt bằng cách chọn ô và nhấn tổ hợp phím mới.",
         AiGuardHelp = "AI Guard hiển thị dưới dạng lớp phủ độc lập, không nhận thao tác chuột, trong các phiên ghi hình được hỗ trợ.",
+        FramesChartTitle = "BIỂU ĐỒ FRAMES / TIẾN ĐỘ LIVE",
+        FramesChartTarget = "MỤC TIÊU: 7.000 FRAME / THÀNH VIÊN",
+        FramesChartNoCapture = "Bắt đầu ghi hình hoặc tham gia Party để theo dõi Frames trực tiếp.",
+        FramesChartNoRound = "Chưa có lượt ghi hình. Biểu đồ Frames sẽ cập nhật khi lượt bắt đầu.",
+        FramesChartWaiting = "Đang chờ dữ liệu Frames trực tiếp…",
+        FramesChartTargetReached = "Đã đạt ngưỡng Frames tối thiểu",
+        FramesChartRemaining = remaining => $"Còn {remaining:N0} frame để đạt ngưỡng",
+        FramesChartCount = count => $"{count} người",
+        PartyRosterTitle = "THÀNH VIÊN PARTY",
+        PartyRosterSubtitle = "TRẠNG THÁI SẴN SÀNG",
+        PartyRosterNotJoined = "Chưa tham gia Party. Tạo hoặc vào Room để xem danh sách thành viên.",
+        PartyRosterNoMembers = "Chưa có thành viên",
+        PartyRosterCount = count => $"{count} thành viên",
+        PartyReady = "SẴN SÀNG",
+        PartyNotReady = "CHƯA SẴN SÀNG",
+        PartyHost = "HOST",
+        PartyYou = "BẠN",
+        PartyMember = "THÀNH VIÊN",
+        LocalDevice = "Máy này",
+        LocalCapture = "GHI HÌNH CỤC BỘ",
         Language = "Ngôn ngữ",
         Source = "Nguồn quay",
         GameProfile = "Hồ sơ game",
