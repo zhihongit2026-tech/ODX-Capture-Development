@@ -596,8 +596,24 @@ public partial class MainWindow : Window
     private bool TryValidateArma3Resolution(out string problem)
     {
         var game = GameBox.SelectedItem as GameItem;
-        string? processName = game?.WindowProcess ?? _settings.WindowProcess;
-        bool isArma3 = (game?.Game ?? game?.Label ?? "").Contains("Arma 3", StringComparison.OrdinalIgnoreCase) ||
+        var roomUpdate = _room?.Agent.Room;
+        GameProfile? roomProfile = null;
+        if (roomUpdate?.GameProfileJson is { Length: > 0 } profileJson)
+        {
+            try
+            {
+                roomProfile = GameProfile.Parse(System.Text.Json.Nodes.JsonNode.Parse(profileJson)!.AsObject(), "Party room preflight");
+            }
+            catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or InvalidOperationException)
+            {
+                problem = "KHÔNG ĐỌC ĐƯỢC HỒ SƠ GAME CỦA PARTY. Không thể xác minh độ phân giải; đã chặn Ready/Start Live.";
+                return false;
+            }
+        }
+
+        string? processName = roomProfile?.WindowProcess ?? game?.WindowProcess ?? _settings.WindowProcess;
+        string gameTitle = roomUpdate?.Game ?? roomProfile?.GameTitle ?? game?.Game ?? game?.Label ?? "";
+        bool isArma3 = gameTitle.Contains("Arma 3", StringComparison.OrdinalIgnoreCase) ||
                        (processName?.Contains("arma3", StringComparison.OrdinalIgnoreCase) == true);
         if (!isArma3)
         {
