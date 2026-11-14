@@ -45,7 +45,6 @@ public sealed class Arma3GuardEvaluatorTests
     [Theory]
     [InlineData("ARMA3_GAME_FPS_LOW")]
     [InlineData("ARMA3_TEAMMATE_VISIBILITY")]
-    [InlineData("ARMA3_PLAYER_STATIONARY")]
     public void Non_stop_warnings_do_not_end_standalone_capture(string code)
     {
         Assert.False(Arma3GuardEvaluator.StopsStandaloneCapture(code));
@@ -99,16 +98,45 @@ public sealed class Arma3GuardEvaluatorTests
     }
 
     [Fact]
-    public void Teammate_visibility_warns_at_one_second_and_escalates_at_two_seconds()
+    public void Any_one_to_three_visible_teammates_is_valid()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        guard.Observe(Sample(1, visible: 1, total: 2), t);
-        guard.Observe(Sample(2, visible: 1, total: 2), t.AddMilliseconds(500));
-        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY" && a.Severity == QualityAlertSeverity.Warning);
-        guard.Observe(Sample(3, visible: 1, total: 2), t.AddSeconds(1));
-        guard.Observe(Sample(4, visible: 1, total: 2), t.AddSeconds(1.5));
-        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY" && a.Severity == QualityAlertSeverity.Critical);
+        guard.Observe(Sample(1, visible: 1, total: 3), t);
+        guard.Observe(Sample(2, visible: 2, total: 3), t.AddMilliseconds(500));
+        guard.Observe(Sample(3, visible: 3, total: 3), t.AddSeconds(1));
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY");
+    }
+
+    [Fact]
+    public void No_visible_teammate_turns_critical_after_two_full_seconds_without_warning()
+    {
+        var guard = new Arma3GuardEvaluator();
+        var t = DateTime.UtcNow;
+        for (int i = 0; i < 4; i++)
+        {
+            var update = guard.Observe(Sample(i + 1, visible: 0, total: 3), t.AddMilliseconds(i * 500));
+            Assert.DoesNotContain(update.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY");
+        }
+
+        var critical = guard.Observe(Sample(5, visible: 0, total: 3), t.AddSeconds(2));
+        Assert.Contains(critical.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY" &&
+            a.Severity == QualityAlertSeverity.Critical);
+        Assert.DoesNotContain(critical.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY" &&
+            a.Severity == QualityAlertSeverity.Warning);
+    }
+
+    [Fact]
+    public void Teammate_visibility_alert_clears_after_a_teammate_is_back_in_frame()
+    {
+        var guard = new Arma3GuardEvaluator();
+        var t = DateTime.UtcNow;
+        for (int i = 1; i <= 5; i++)
+            guard.Observe(Sample(i, visible: 0, total: 3), t.AddMilliseconds((i - 1) * 500));
+        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY");
+        guard.Observe(Sample(6, visible: 1, total: 3), t.AddSeconds(2.5));
+        var recovered = guard.Observe(Sample(7, visible: 1, total: 3), t.AddSeconds(3));
+        Assert.DoesNotContain(recovered.Alerts, a => a.Code == "ARMA3_TEAMMATE_VISIBILITY");
     }
 
     [Fact]
@@ -120,16 +148,13 @@ public sealed class Arma3GuardEvaluatorTests
     }
 
     [Fact]
-    public void Stationary_player_warns_at_five_seconds_and_escalates_at_ten_seconds()
+    public void Standing_still_does_not_create_a_guard_alert()
     {
         var guard = new Arma3GuardEvaluator();
         var t = DateTime.UtcNow;
-        for (int i = 1; i <= 10; i++)
-            guard.Observe(Sample(i, speed: 0.1), t.AddMilliseconds(i * 500));
-        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_PLAYER_STATIONARY" && a.Severity == QualityAlertSeverity.Warning);
-        for (int i = 11; i <= 20; i++)
-            guard.Observe(Sample(i, speed: 0.1), t.AddMilliseconds(i * 500));
-        Assert.Contains(guard.Alerts, a => a.Code == "ARMA3_PLAYER_STATIONARY" && a.Severity == QualityAlertSeverity.Critical);
+        for (int i = 1; i <= 20; i++)
+            guard.Observe(Sample(i, speed: 0), t.AddMilliseconds(i * 500));
+        Assert.DoesNotContain(guard.Alerts, a => a.Code == "ARMA3_PLAYER_STATIONARY");
     }
 
     [Fact]
