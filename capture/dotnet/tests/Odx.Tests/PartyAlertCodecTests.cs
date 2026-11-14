@@ -14,15 +14,17 @@ public sealed class PartyAlertCodecTests
             new("GAME_FPS", QualityAlertSeverity.Warning, "Game FPS low", "49 FPS"),
             new("GAME_ESC", QualityAlertSeverity.Critical, "ESC pressed", "Player pressed ESC"),
             new("NOT_VERIFIED", QualityAlertSeverity.Info, "Not verified", "No sensor"),
+            new("ODX_VIDEO_FRAMES", QualityAlertSeverity.Info, "Frames 6500/7000", "CHƯA ĐẠT"),
         ];
 
         string problem = PartyAlertCodec.Encode("round-01", alerts);
 
         Assert.StartsWith("ODX_ALERTS|round-01|", problem);
         Assert.True(PartyAlertCodec.TryDecode(problem, "round-01", out var decoded));
-        Assert.Equal(2, decoded.Length);
+        Assert.Equal(3, decoded.Length);
         Assert.Contains(decoded, a => a.Code == "GAME_FPS" && a.Severity == QualityAlertSeverity.Warning);
         Assert.Contains(decoded, a => a.Code == "GAME_ESC" && a.Severity == QualityAlertSeverity.Critical);
+        Assert.Contains(decoded, a => a.Code == "ODX_VIDEO_FRAMES" && a.Severity == QualityAlertSeverity.Info);
     }
 
     [Fact]
