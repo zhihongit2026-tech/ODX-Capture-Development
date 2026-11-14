@@ -11,7 +11,7 @@ namespace Odx.App;
 
 public sealed record GuardAlertView(string Title, string Detail, Brush Brush);
 
-/// <summary>Independent click-through overlay. It is shown only when capture exclusion is confirmed by Windows.</summary>
+/// <summary>Independent click-through overlay, kept visible until the round's 235-second deadline when capture exclusion is confirmed.</summary>
 public partial class SmartGuardOverlay : Window
 {
     private const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
@@ -129,6 +129,4 @@ public partial class SmartGuardOverlay : Window
     [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr hwnd, int index);
     [DllImport("user32.dll")] private static extern int SetWindowLongW(IntPtr hwnd, int index, int value);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
-    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 }
