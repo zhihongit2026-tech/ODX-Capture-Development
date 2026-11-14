@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
@@ -212,7 +213,8 @@ internal static class Program
             guard.UpdateAlerts([new Odx.Core.QualityAlert("TEST_ONLY", Odx.Core.QualityAlertSeverity.Warning, "Cảnh báo kiểm tra chữ tiếng Việt", "Dữ liệu minh họa chỉ nằm trong bộ kiểm thử giao diện.")]);
             foreach (Window auxiliary in new Window[] { new Odx.App.JoinRoomDialog(Odx.App.Strings.Vi), toast, guard, new Odx.App.CountdownOverlay { Text = "ĐANG LƯU" } })
             {
-                var content = (FrameworkElement)auxiliary.Content;
+                var content = auxiliary.Content as FrameworkElement
+                    ?? throw new InvalidOperationException("Auxiliary window has no layout content.");
                 // Rendering a detached content tree exercises typography without starting overlay capture-exclusion or timers.
                 auxiliary.Content = null;
                 content.Measure(new Size(1920.0 / (percent / 100.0), double.PositiveInfinity));
@@ -240,7 +242,7 @@ internal static class Program
         using (var file = File.Create(Path.Combine(output, name + ".png")))
         { var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); encoder.Save(file); }
         var text = Descendants(content).OfType<TextBlock>().Where(t => VisibleWithin(t, content) && t.ActualWidth > 1 && t.ActualHeight > 1 && !string.IsNullOrWhiteSpace(t.Text) && !t.FontFamily.Source.Contains("MDL2", StringComparison.Ordinal)).ToArray();
-        Require(text.Length >= minimumText && text.Any(t => t.Text.Any(c => c >= '\u1EA0' && c <= '\u1EF9')), "Vietnamese content was not laid out: " + name);
+        Require(text.Length >= minimumText && text.Any(t => HasVietnameseLetters(t.Text)), "Vietnamese content was not laid out: " + name);
         var renderedFonts = new HashSet<string>();
         foreach (TextBlock block in text)
         {
@@ -317,6 +319,8 @@ internal static class Program
         }
         return false;
     }
+    private static bool HasVietnameseLetters(string text) => text.Normalize(NormalizationForm.FormC).Any(c =>
+        c is >= '\u1EA0' and <= '\u1EF9' || "ĂăÂâĐđÊêÔôƠơƯưÀÁÃÈÉÌÍÒÓÕÙÚÝàáãèéìíòóõùúý".Contains(c));
     private static IEnumerable<GlyphRunDrawing> Glyphs(Drawing drawing)
     {
         if (drawing is GlyphRunDrawing glyph) yield return glyph;

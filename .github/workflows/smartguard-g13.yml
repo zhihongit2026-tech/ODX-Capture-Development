@@ -44,6 +44,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed on both full runs' }
           }
 
+      - name: Build Windows UI regression harness
+        working-directory: capture/dotnet
+        shell: pwsh
+        run: |
+          dotnet build tests/Odx.Ui.Tests/Odx.Ui.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows UI regression harness build failed' }
+
       - name: Build native extractor and Arma 3 extension
         shell: pwsh
         run: |
@@ -222,7 +229,7 @@ jobs:
           # Exercise a disposable copy of the actual ZIP, never the distribution or a user installation.
           Expand-Archive -LiteralPath $packageZip -DestinationPath $testRoot
           try {
-            dotnet run --project capture/dotnet/tests/Odx.Ui.Tests -c Release -- --package $testRoot --output (Join-Path $evidence 'UI')
+            dotnet run --project capture/dotnet/tests/Odx.Ui.Tests -c Release --no-build -- --package $testRoot --output (Join-Path $evidence 'UI')
             if ($LASTEXITCODE -ne 0) { throw 'Packaged UI regression or WPF layout inspection failed; inspect the QA evidence artifact' }
           }
           finally {
